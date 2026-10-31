@@ -17,6 +17,7 @@ const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const DeckRules = preload("res://scripts/core/DeckRules.gd")
 const DeckLibrary = preload("res://scripts/core/DeckLibrary.gd")
 const PromotionChoiceDialog = preload("res://scripts/scenes/PromotionChoiceDialog.gd")
+const JP_FONT = preload("res://assets/fonts/NotoSansJP.ttf")
 
 const BOARD_SIZE: int = 9
 # 段番号の漢数字表記
@@ -1185,7 +1186,7 @@ func _draw_shogi_piece(center: Vector2, piece_owner: int, border_color: Color, l
 
 	# 文字は両陣営とも読みやすい向きのまま中央に表示する。
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(center.x - 20.0, center.y + 5.0),
 		label,
 		HORIZONTAL_ALIGNMENT_CENTER,
@@ -1212,7 +1213,7 @@ func _draw() -> void:
 		status = "先手の勝利！" if winner == 0 else "後手の勝利！"
 
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(180, 35),
 		status,
 		HORIZONTAL_ALIGNMENT_LEFT,
@@ -1227,7 +1228,7 @@ func _draw() -> void:
 		current_player
 	):
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			Vector2(180, 66),
 			"王手！",
 			HORIZONTAL_ALIGNMENT_LEFT,
@@ -1238,7 +1239,7 @@ func _draw() -> void:
 
 	# 山札・コスト情報
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(340, 45),
 		"山札：先手 %d枚 / 後手 %d枚"
 		% [decks[0].size(), decks[1].size()],
@@ -1249,7 +1250,7 @@ func _draw() -> void:
 	)
 
 	# コスト・備蓄・次回復量および現在手番の下線描画
-	var font := ThemeDB.fallback_font
+	var font := JP_FONT
 	var base_y := 80.0
 	var label_size := 26
 	var sub_size := 18
@@ -1317,7 +1318,7 @@ func _draw() -> void:
 	# 旗本の公開情報など、両プレイヤーに見せる通知。
 	if not public_notice.is_empty():
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			Vector2(80, 116),
 			public_notice,
 			HORIZONTAL_ALIGNMENT_LEFT,
@@ -1352,7 +1353,7 @@ func _draw() -> void:
 	for col in range(BOARD_SIZE):
 		var file_text: String = str(col + 1) if is_rotated else str(BOARD_SIZE - col)
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			BOARD_ORIGIN + Vector2(
 				col * CELL_SIZE + 25,
 				-12
@@ -1368,7 +1369,7 @@ func _draw() -> void:
 	for row in range(BOARD_SIZE):
 		var rank_text: String = RANK_KANJI[BOARD_SIZE - 1 - row] if is_rotated else RANK_KANJI[row]
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			BOARD_ORIGIN + Vector2(
 				-25,
 				row * CELL_SIZE + 36
@@ -1432,7 +1433,7 @@ func _draw() -> void:
 		else:
 			draw_circle(center, 20.0, piece_color)
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				center + Vector2(-12, 7),
 				display_name,
 				HORIZONTAL_ALIGNMENT_LEFT,
@@ -1478,7 +1479,7 @@ func _draw() -> void:
 		]
 
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(604, 135),
 		hand_title,
 		HORIZONTAL_ALIGNMENT_LEFT,
@@ -1489,7 +1490,7 @@ func _draw() -> void:
 
 	if shared_test_mode and current_player != local_test_player:
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			Vector2(604, 200),
 			"（画面共有中：相手の手札は非表示）",
 			HORIZONTAL_ALIGNMENT_LEFT,
@@ -1498,7 +1499,7 @@ func _draw() -> void:
 			Color(0.70, 0.73, 0.80)
 		)
 		draw_string(
-			ThemeDB.fallback_font,
+			JP_FONT,
 			Vector2(604, 230),
 			"相手の行動をお待ちください。",
 			HORIZONTAL_ALIGNMENT_LEFT,
@@ -1509,7 +1510,7 @@ func _draw() -> void:
 	else:
 		if current_hand.is_empty():
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				Vector2(614, 200),
 				"手札がありません",
 				HORIZONTAL_ALIGNMENT_LEFT,
@@ -1610,7 +1611,7 @@ func _draw() -> void:
 	
 			# カテゴリー
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				card_rect.position + Vector2(9, 30),
 				category,
 				HORIZONTAL_ALIGNMENT_LEFT,
@@ -1621,7 +1622,7 @@ func _draw() -> void:
 	
 			# カード名
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				card_rect.position + Vector2(6, 72),
 				card_name_for_texture,
 				HORIZONTAL_ALIGNMENT_CENTER,
@@ -1644,7 +1645,7 @@ func _draw() -> void:
 			)
 	
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				card_rect.position + Vector2(
 					HAND_CARD_SIZE.x - 35,
 					30
@@ -1657,7 +1658,7 @@ func _draw() -> void:
 			)
 	
 			draw_string(
-				ThemeDB.fallback_font,
+				JP_FONT,
 				card_rect.position + Vector2(9, 118),
 				"コスト: %d" % int(card.get("cost", 0)),
 				HORIZONTAL_ALIGNMENT_LEFT,
@@ -1667,7 +1668,7 @@ func _draw() -> void:
 			)
 	# 両プレイヤーの成デッキ
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(604, 535),
 		"先手の成デッキ：" + promotion_deck_summary(0),
 		HORIZONTAL_ALIGNMENT_LEFT,
@@ -1677,7 +1678,7 @@ func _draw() -> void:
 	)
 
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(604, 558),
 		"後手の成デッキ：" + promotion_deck_summary(1),
 		HORIZONTAL_ALIGNMENT_LEFT,
@@ -1687,7 +1688,7 @@ func _draw() -> void:
 	)
 
 	draw_string(
-		ThemeDB.fallback_font,
+		JP_FONT,
 		Vector2(604, 592),
 		"操作ガイド",
 		HORIZONTAL_ALIGNMENT_LEFT,
@@ -1697,9 +1698,9 @@ func _draw() -> void:
 	)
 
 	if shared_test_mode:
-		draw_string(ThemeDB.fallback_font, Vector2(604, 614), "数字キー：手札選択 / F2：成デッキ出力", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
+		draw_string(JP_FONT, Vector2(604, 614), "数字キー：手札選択 / F2：成デッキ出力", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
 	else:
-		draw_string(ThemeDB.fallback_font, Vector2(604, 614), "タップ／クリック：手札選択・駒移動・召喚", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
+		draw_string(JP_FONT, Vector2(604, 614), "タップ／クリック：手札選択・駒移動・召喚", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
 
 	_update_action_ui()
 	
