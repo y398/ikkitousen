@@ -1062,7 +1062,7 @@ func _draw() -> void:
 			Color(0.55, 0.58, 0.65)
 		)
 	else:
-	if current_hand.is_empty():
+		if current_hand.is_empty():
 			draw_string(
 				ThemeDB.fallback_font,
 				Vector2(614, 200),
