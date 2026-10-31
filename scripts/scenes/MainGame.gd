@@ -52,7 +52,13 @@ var side_choice_buttons: Array[Button] = []
 var pending_discard_hand_number: int = 0
 var game_initialized: bool = false
 
-# 対局開始前に、先手・後手が使用する保存デッキを選ぶ。
+# タッチ・マウス操作用のHUDボタン
+var action_ui_layer: CanvasLayer
+var end_turn_button: Button
+var cancel_button: Button
+var context_action_button: Button
+
+# 対局開始前に、先手・後手が使用する保存デッキを選ぶ
 var deck_library: Dictionary = {}
 var deck_selection_layer: CanvasLayer
 var deck_selection_status_label: Label
@@ -139,6 +145,7 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	get_window().size = Vector2i(800, 850)
 	_create_title_return_button()
+	_create_action_ui_buttons()
 
 	var loaded_library: Dictionary = DeckLibrary.load_library()
 	deck_library = loaded_library.get("decks", DeckLibrary.default_decks())
@@ -537,6 +544,216 @@ func _create_title_return_button() -> void:
 
 	ui_layer.add_child(button)
 	button.pressed.connect(_return_to_title)
+
+
+# タッチ・マウス操作用のボタングループを生成する
+func _create_action_ui_buttons() -> void:
+	action_ui_layer = CanvasLayer.new()
+	action_ui_layer.layer = 10
+	add_child(action_ui_layer)
+
+	# 1. 手番終了ボタン
+	end_turn_button = Button.new()
+	end_turn_button.text = "手番終了 (Space)"
+	end_turn_button.tooltip_text = "手番を終了し、相手のターンへ移行する"
+	end_turn_button.custom_minimum_size = Vector2(240, 46)
+	end_turn_button.focus_mode = Control.FOCUS_NONE
+	end_turn_button.add_theme_font_size_override("font_size", 16)
+	end_turn_button.offset_left = 880.0
+	end_turn_button.offset_top = 580.0
+	end_turn_button.offset_right = 1120.0
+	end_turn_button.offset_bottom = 626.0
+
+	var end_turn_style := StyleBoxFlat.new()
+	end_turn_style.bg_color = Color(0.12, 0.18, 0.28)
+	end_turn_style.border_color = Color(0.84, 0.65, 0.30)
+	end_turn_style.set_border_width_all(2)
+	end_turn_style.set_corner_radius_all(6)
+	end_turn_button.add_theme_stylebox_override("normal", end_turn_style)
+
+	var end_turn_hover := StyleBoxFlat.new()
+	end_turn_hover.bg_color = Color(0.18, 0.26, 0.40)
+	end_turn_hover.border_color = Color(1.0, 0.82, 0.45)
+	end_turn_hover.set_border_width_all(2)
+	end_turn_hover.set_corner_radius_all(6)
+	end_turn_button.add_theme_stylebox_override("hover", end_turn_hover)
+
+	var end_turn_disabled := StyleBoxFlat.new()
+	end_turn_disabled.bg_color = Color(0.10, 0.12, 0.16, 0.6)
+	end_turn_disabled.border_color = Color(0.35, 0.38, 0.45, 0.5)
+	end_turn_disabled.set_border_width_all(1)
+	end_turn_disabled.set_corner_radius_all(6)
+	end_turn_button.add_theme_stylebox_override("disabled", end_turn_disabled)
+
+	end_turn_button.pressed.connect(_on_end_turn_button_pressed)
+	action_ui_layer.add_child(end_turn_button)
+
+	# 2. 選択解除ボタン
+	cancel_button = Button.new()
+	cancel_button.text = "選択解除 (Esc)"
+	cancel_button.tooltip_text = "現在の選択や操作を取り消す"
+	cancel_button.custom_minimum_size = Vector2(115, 40)
+	cancel_button.focus_mode = Control.FOCUS_NONE
+	cancel_button.add_theme_font_size_override("font_size", 14)
+	cancel_button.offset_left = 1005.0
+	cancel_button.offset_top = 530.0
+	cancel_button.offset_right = 1120.0
+	cancel_button.offset_bottom = 570.0
+
+	var cancel_style := StyleBoxFlat.new()
+	cancel_style.bg_color = Color(0.14, 0.16, 0.22)
+	cancel_style.border_color = Color(0.40, 0.45, 0.55)
+	cancel_style.set_border_width_all(1)
+	cancel_style.set_corner_radius_all(6)
+	cancel_button.add_theme_stylebox_override("normal", cancel_style)
+
+	var cancel_hover := StyleBoxFlat.new()
+	cancel_hover.bg_color = Color(0.20, 0.24, 0.32)
+	cancel_hover.border_color = Color(0.60, 0.68, 0.80)
+	cancel_hover.set_border_width_all(2)
+	cancel_hover.set_corner_radius_all(6)
+	cancel_button.add_theme_stylebox_override("hover", cancel_hover)
+
+	var cancel_disabled := StyleBoxFlat.new()
+	cancel_disabled.bg_color = Color(0.08, 0.10, 0.14, 0.4)
+	cancel_disabled.border_color = Color(0.25, 0.28, 0.35, 0.3)
+	cancel_disabled.set_border_width_all(1)
+	cancel_disabled.set_corner_radius_all(6)
+	cancel_button.add_theme_stylebox_override("disabled", cancel_disabled)
+
+	cancel_button.pressed.connect(_on_cancel_button_pressed)
+	action_ui_layer.add_child(cancel_button)
+
+	# 3. 文脈アクションボタン（攻撃／罠起動）
+	context_action_button = Button.new()
+	context_action_button.text = "アクション"
+	context_action_button.custom_minimum_size = Vector2(115, 40)
+	context_action_button.focus_mode = Control.FOCUS_NONE
+	context_action_button.add_theme_font_size_override("font_size", 14)
+	context_action_button.offset_left = 880.0
+	context_action_button.offset_top = 530.0
+	context_action_button.offset_right = 995.0
+	context_action_button.offset_bottom = 570.0
+	context_action_button.visible = false
+
+	context_action_button.pressed.connect(_on_action_button_pressed)
+	action_ui_layer.add_child(context_action_button)
+
+
+func _on_end_turn_button_pressed() -> void:
+	if game_over or discard_mode:
+		return
+	print("%sが手番を終了しました" % ("先手" if current_player == 0 else "後手"))
+	end_turn()
+
+
+func _on_cancel_button_pressed() -> void:
+	if pending_special_trap_waiting_for_target:
+		_finish_pending_special_trap(Vector2i(-1, -1))
+		return
+
+	var had_selection: bool = (
+		selected_hand_index >= 0
+		or selected_square.x != -1
+		or pending_wall_square.x != -1
+	)
+	selected_hand_index = -1
+	selected_square = Vector2i(-1, -1)
+	pending_wall_square = Vector2i(-1, -1)
+	pending_discard_hand_number = 0
+	if had_selection:
+		print("選択をキャンセルしました")
+	queue_redraw()
+
+
+func _on_action_button_pressed() -> void:
+	if game_over or has_moved_this_turn:
+		return
+	if selected_square.x < 1 or not pieces.has(selected_square):
+		return
+
+	var selected_piece: Dictionary = pieces[selected_square]
+	if AttackRules.is_archer(selected_piece):
+		_perform_archer_attack()
+	elif str(selected_piece.get("category", "")) == "罠" and TrapRules.is_special_effect(TrapRules.get_effect_id(selected_piece)):
+		_activate_selected_special_trap()
+
+
+# ボタンUIの活性状態および表示内容を最新のゲーム状態と同期する
+func _update_action_ui() -> void:
+	if action_ui_layer == null or end_turn_button == null or cancel_button == null or context_action_button == null:
+		return
+
+	# デッキ選択中・陣営選択中またはゲーム未初期化時は非表示とする
+	var is_in_setup := (
+		(deck_selection_layer != null and is_instance_valid(deck_selection_layer))
+		or (side_selection_layer != null and is_instance_valid(side_selection_layer))
+		or not game_initialized
+	)
+	action_ui_layer.visible = not is_in_setup
+	if is_in_setup:
+		return
+
+	# 手番終了ボタンの更新
+	if game_over:
+		end_turn_button.disabled = true
+		end_turn_button.text = "対局終了"
+	elif discard_mode:
+		end_turn_button.disabled = true
+		end_turn_button.text = "手札超過：破棄中"
+	else:
+		end_turn_button.disabled = false
+		end_turn_button.text = "手番終了 (Space)"
+
+	# 選択解除ボタンの更新
+	var has_selection: bool = (
+		selected_hand_index >= 0
+		or selected_square.x >= 1
+		or pending_wall_square.x >= 1
+		or pending_special_trap_waiting_for_target
+	)
+	cancel_button.disabled = not has_selection or game_over
+
+	# 文脈アクションボタン（攻撃／罠起動）の更新
+	if game_over or selected_square.x < 1 or not pieces.has(selected_square):
+		context_action_button.visible = false
+		return
+
+	var selected_piece: Dictionary = pieces[selected_square]
+	var piece_owner: int = int(selected_piece.get("owner", -1))
+	if piece_owner != current_player:
+		context_action_button.visible = false
+		return
+
+	if AttackRules.is_archer(selected_piece):
+		context_action_button.visible = true
+		var attack_target := _get_archer_attack_target_square(selected_square)
+		var attack_cost := int(selected_piece.get("attack_cost", 1))
+		var can_attack := attack_target.x >= 1 and not has_moved_this_turn and (costs[current_player] + reserves[current_player] >= attack_cost)
+		context_action_button.text = "弓手 攻撃 (A)"
+		context_action_button.disabled = not can_attack
+
+		var attack_style := StyleBoxFlat.new()
+		attack_style.bg_color = Color(0.38, 0.10, 0.12) if can_attack else Color(0.16, 0.10, 0.12, 0.5)
+		attack_style.border_color = Color(0.95, 0.25, 0.25) if can_attack else Color(0.40, 0.25, 0.25, 0.5)
+		attack_style.set_border_width_all(2)
+		attack_style.set_corner_radius_all(6)
+		context_action_button.add_theme_stylebox_override("normal", attack_style)
+	elif str(selected_piece.get("category", "")) == "罠" and TrapRules.is_special_effect(TrapRules.get_effect_id(selected_piece)):
+		context_action_button.visible = true
+		var activation_cost := int(selected_piece.get("activation_cost", 1))
+		var can_activate := not has_moved_this_turn and (costs[current_player] + reserves[current_player] >= activation_cost)
+		context_action_button.text = "罠 起動 (F)"
+		context_action_button.disabled = not can_activate
+
+		var trap_style := StyleBoxFlat.new()
+		trap_style.bg_color = Color(0.32, 0.20, 0.08) if can_activate else Color(0.16, 0.12, 0.08, 0.5)
+		trap_style.border_color = Color(0.95, 0.65, 0.15) if can_activate else Color(0.40, 0.32, 0.15, 0.5)
+		trap_style.set_border_width_all(2)
+		trap_style.set_corner_radius_all(6)
+		context_action_button.add_theme_stylebox_override("normal", trap_style)
+	else:
+		context_action_button.visible = false
 
 
 func _return_to_title() -> void:
@@ -1285,41 +1502,40 @@ func _draw() -> void:
 	# 両プレイヤーの成デッキ
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(604, 550),
+		Vector2(604, 535),
 		"先手の成デッキ：" + promotion_deck_summary(0),
 		HORIZONTAL_ALIGNMENT_LEFT,
-		540,
+		260,
 		14,
 		Color(0.90, 0.93, 0.98)
 	)
 
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(604, 570),
+		Vector2(604, 558),
 		"後手の成デッキ：" + promotion_deck_summary(1),
 		HORIZONTAL_ALIGNMENT_LEFT,
-		540,
+		260,
 		14,
 		Color(0.90, 0.93, 0.98)
 	)
+
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(950, 550),
-		"操作方法",
+		Vector2(604, 592),
+		"操作ガイド",
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
-		18,
+		16,
 		Color(0.95, 0.97, 1.0)
 	)
-	
+
 	if shared_test_mode:
-		draw_string(ThemeDB.fallback_font, Vector2(950, 580), "数字キー：手札選択", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-		draw_string(ThemeDB.fallback_font, Vector2(950, 605), "自陣空きマス：召喚", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-		draw_string(ThemeDB.fallback_font, Vector2(950, 630), "F2：成デッキ出力 / Space：手番終了", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
+		draw_string(ThemeDB.fallback_font, Vector2(604, 614), "数字キー：手札選択 / F2：成デッキ出力", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
 	else:
-		draw_string(ThemeDB.fallback_font, Vector2(950, 580), "カードクリック：手札選択", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-		draw_string(ThemeDB.fallback_font, Vector2(950, 605), "盤面空きマス：召喚・駒移動", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-		draw_string(ThemeDB.fallback_font, Vector2(950, 630), "Esc：選択解除 / Space：手番終了", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
+		draw_string(ThemeDB.fallback_font, Vector2(604, 614), "タップ／クリック：手札選択・駒移動・召喚", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
+
+	_update_action_ui()
 	
 func square_rect(square: Vector2i) -> Rect2:
 	var col: int
