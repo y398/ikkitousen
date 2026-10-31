@@ -1,7 +1,7 @@
 
 # ==================================================
 # ファイル名: MainGame.gd
-# 概要: 対局の全般進行（盤面描画・手札管理・コスト/備蓄計算・駒移動・召喚・罠処理・画面共有モード）を統括するメインゲームシーンクラスである
+# 概要: 対局の全般進行（盤面描画・手札管理・コスト/備蓄計算・駒移動・召喚・罠処理・画面共有モード・P2Pルームマッチ）を統括するメインゲームシーンクラスである
 # ==================================================
 
 extends Node2D
@@ -57,6 +57,10 @@ var action_ui_layer: CanvasLayer
 var end_turn_button: Button
 var cancel_button: Button
 var context_action_button: Button
+
+# P2P通信対局用の同期フラグ
+var _is_remote_action: bool = false
+var _p2p_disconnected: bool = false
 
 # 対局開始前に、先手・後手が使用する保存デッキを選ぶ
 var deck_library: Dictionary = {}
@@ -147,15 +151,25 @@ func _ready() -> void:
 	_create_title_return_button()
 	_create_action_ui_buttons()
 
-	var loaded_library: Dictionary = DeckLibrary.load_library()
-	deck_library = loaded_library.get("decks", DeckLibrary.default_decks())
-	if not bool(loaded_library.get("valid", false)):
-		push_warning(str(loaded_library.get("message", "保存デッキを読み込めませんでした。")))
-	if shared_test_mode:
-		_create_side_selection_overlay(str(loaded_library.get("last_selected_deck_id", "deck_1")))
+	if P2PNetwork.is_p2p_match:
+		_initialize_p2p_match()
 	else:
-		_create_deck_selection_overlay(str(loaded_library.get("last_selected_deck_id", "deck_1")))
+		var loaded_library: Dictionary = DeckLibrary.load_library()
+		deck_library = loaded_library.get("decks", DeckLibrary.default_decks())
+		if not bool(loaded_library.get("valid", false)):
+			push_warning(str(loaded_library.get("message", "保存デッキを読み込めませんでした。")))
+		if shared_test_mode:
+			_create_side_selection_overlay(str(loaded_library.get("last_selected_deck_id", "deck_1")))
+		else:
+			_create_deck_selection_overlay(str(loaded_library.get("last_selected_deck_id", "deck_1")))
 	queue_redraw()
+
+
+func _exit_tree() -> void:
+	if P2PNetwork.message_received.is_connected(_on_p2p_message_received):
+		P2PNetwork.message_received.disconnect(_on_p2p_message_received)
+	if P2PNetwork.connection_closed.is_connected(_on_p2p_connection_closed):
+		P2PNetwork.connection_closed.disconnect(_on_p2p_connection_closed)
 
 
 func _create_deck_selection_overlay(preferred_first_id: String) -> void:
@@ -293,6 +307,126 @@ func _on_match_deck_selection_confirmed() -> void:
 	if is_instance_valid(deck_selection_layer):
 		deck_selection_layer.queue_free()
 	deck_selection_layer = null
+	queue_redraw()
+
+
+# P2Pルームマッチとして対局を初期化する
+func _initialize_p2p_match() -> void:
+	if not P2PNetwork.message_received.is_connected(_on_p2p_message_received):
+		P2PNetwork.message_received.connect(_on_p2p_message_received)
+	if not P2PNetwork.connection_closed.is_connected(_on_p2p_connection_closed):
+		P2PNetwork.connection_closed.connect(_on_p2p_connection_closed)
+
+	var startup_players: Array = [
+		P2PNetwork.host_deck_profile.duplicate(true),
+		P2PNetwork.guest_deck_profile.duplicate(true)
+	]
+
+	# ホストとゲストで共通の乱数シードを用いて山札の同一性を保証する
+	if P2PNetwork.shared_random_seed != 0:
+		seed(P2PNetwork.shared_random_seed)
+
+	_initialize_match_from_profiles(startup_players)
+	print("P2Pルームマッチを開始した　あなたの陣営: %s" % ("先手(ホスト)" if P2PNetwork.local_player_id == 0 else "後手(ゲスト)"))
+
+
+# P2P対局のアクションパケットを送信する
+func _send_p2p_action(data: Dictionary) -> void:
+	if not P2PNetwork.is_p2p_match:
+		return
+	if _is_remote_action:
+		return
+	P2PNetwork.send_message(data)
+
+
+# 相手プレイヤーから受信したアクションパケットを盤面に適用する
+func _on_p2p_message_received(msg: Dictionary) -> void:
+	var action: String = str(msg.get("action", ""))
+	_is_remote_action = true
+	match action:
+		"summon":
+			var hand_idx: int = int(msg.get("hand_index", -1))
+			var sq_arr: Array = msg.get("square", [])
+			var pending_arr: Array = msg.get("pending_wall_square", [])
+			if sq_arr.size() == 2:
+				var sq := Vector2i(int(sq_arr[0]), int(sq_arr[1]))
+				if pending_arr.size() == 2:
+					pending_wall_square = Vector2i(int(pending_arr[0]), int(pending_arr[1]))
+				selected_hand_index = hand_idx
+				summon_piece(sq)
+		"move":
+			var from_arr: Array = msg.get("from", [])
+			var to_arr: Array = msg.get("to", [])
+			if from_arr.size() == 2 and to_arr.size() == 2:
+				var from_sq := Vector2i(int(from_arr[0]), int(from_arr[1]))
+				var to_sq := Vector2i(int(to_arr[0]), int(to_arr[1]))
+				_execute_remote_move(from_sq, to_sq)
+		"archer_attack":
+			var sq_arr: Array = msg.get("square", [])
+			if sq_arr.size() == 2:
+				selected_square = Vector2i(int(sq_arr[0]), int(sq_arr[1]))
+				_perform_archer_attack()
+		"activate_trap":
+			var sq_arr: Array = msg.get("square", [])
+			if sq_arr.size() == 2:
+				selected_square = Vector2i(int(sq_arr[0]), int(sq_arr[1]))
+				_activate_selected_special_trap()
+		"trap_target":
+			var sq_arr: Array = msg.get("chosen_square", [])
+			if sq_arr.size() == 2:
+				var chosen_sq := Vector2i(int(sq_arr[0]), int(sq_arr[1]))
+				_finish_pending_special_trap(chosen_sq)
+		"destroy_wall":
+			var from_arr: Array = msg.get("from", [])
+			var wall_arr: Array = msg.get("wall", [])
+			if from_arr.size() == 2 and wall_arr.size() == 2:
+				var from_sq := Vector2i(int(from_arr[0]), int(from_arr[1]))
+				var wall_sq := Vector2i(int(wall_arr[0]), int(wall_arr[1]))
+				try_destroy_wall(from_sq, wall_sq)
+		"promotion":
+			var choice: String = str(msg.get("choice", ""))
+			if choice.is_empty():
+				_on_promotion_declined()
+			else:
+				_on_promotion_selected(choice)
+		"discard":
+			var hand_idx: int = int(msg.get("hand_index", -1))
+			if hand_idx >= 0 and hand_idx < hands[current_player].size():
+				hands[current_player].remove_at(hand_idx)
+				queue_redraw()
+		"end_turn":
+			_complete_end_turn()
+	_is_remote_action = false
+	queue_redraw()
+
+
+# 相手プレイヤーから受信した駒移動を安全に実行する
+func _execute_remote_move(move_from: Vector2i, move_to: Vector2i) -> void:
+	if not pieces.has(move_from):
+		return
+	if not spend_cost(current_player, 1):
+		return
+	var moving_piece: Dictionary = pieces[move_from].duplicate(true)
+	var triggered_traps: Array[Vector2i] = _get_traps_triggered_by_move(
+		move_from,
+		move_to,
+		moving_piece
+	)
+	if _process_traps_before_move(
+		move_from,
+		move_to,
+		moving_piece,
+		triggered_traps,
+		0
+	):
+		return
+	_complete_piece_move(move_from, move_to, moving_piece)
+
+
+# 通信切断時のハンドラーである
+func _on_p2p_connection_closed() -> void:
+	_p2p_disconnected = true
+	print("対戦相手との通信が切断された")
 	queue_redraw()
 
 
@@ -693,6 +827,21 @@ func _update_action_ui() -> void:
 	action_ui_layer.visible = not is_in_setup
 	if is_in_setup:
 		return
+
+	# P2P対局時、通信切断または相手の手番中は操作ボタンを制御する
+	if P2PNetwork.is_p2p_match:
+		if _p2p_disconnected:
+			end_turn_button.disabled = true
+			end_turn_button.text = "通信切断"
+			cancel_button.disabled = true
+			context_action_button.visible = false
+			return
+		elif current_player != P2PNetwork.local_player_id and pending_special_trap_mode == "":
+			end_turn_button.disabled = true
+			end_turn_button.text = "相手の手番（思考中...）"
+			cancel_button.disabled = true
+			context_action_button.visible = false
+			return
 
 	# 手番終了ボタンの更新
 	if game_over:
@@ -1114,7 +1263,8 @@ func _draw() -> void:
 	# 先手情報：コスト、次ターン回復量、備蓄最大値を描画する
 	var sente_start_x := cur_x
 	var sente_rec := _calculate_expected_recovery(0)
-	var sente_main_text := "先手 %d" % costs[0]
+	var sente_label := "先手" + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 0 else "")
+	var sente_main_text := "%s %d" % [sente_label, costs[0]]
 	var sente_rec_text := " (+%d)" % sente_rec
 	var sente_sub_text := "（備蓄%d/%d）" % [reserves[0], MAX_RESERVES]
 
@@ -1143,7 +1293,8 @@ func _draw() -> void:
 	# 後手情報：コスト、次ターン回復量、備蓄最大値を描画する
 	var gote_start_x := cur_x
 	var gote_rec := _calculate_expected_recovery(1)
-	var gote_main_text := "後手 %d" % costs[1]
+	var gote_label := "後手" + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 1 else "")
+	var gote_main_text := "%s %d" % [gote_label, costs[1]]
 	var gote_rec_text := " (+%d)" % gote_rec
 	var gote_sub_text := "（備蓄%d/%d）" % [reserves[1], MAX_RESERVES]
 
@@ -1297,19 +1448,35 @@ func _draw() -> void:
 	# 発動待ちの特殊罠が選択対象にできる敵駒を表示する。
 	_draw_special_trap_target_highlights()
 
-	# 現在のプレイヤーの手札を表示
-	var current_hand: Array = hands[current_player]
+	# 現在表示するプレイヤーの手札を決定する（P2P対局時は常にローカルプレイヤーの手札）
+	var display_player: int = P2PNetwork.local_player_id if P2PNetwork.is_p2p_match else current_player
+	var current_hand: Array = hands[display_player]
 
-	var hand_title: String = "%sの手札（%d/5）" % [
-		"先手" if current_player == 0 else "後手",
-		current_hand.size()
-	]
-	
-	if discard_mode:
-		hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % [
+	var hand_title: String = ""
+	var title_color: Color = Color(0.95, 0.97, 1.0)
+	if P2PNetwork.is_p2p_match:
+		if _p2p_disconnected:
+			hand_title = "通信が切断されました　タイトルに戻ってください"
+			title_color = Color(1.0, 0.35, 0.35)
+		elif current_player == P2PNetwork.local_player_id:
+			if discard_mode:
+				hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % current_hand.size()
+				title_color = Color(1.0, 0.45, 0.40)
+			else:
+				hand_title = "あなたの手札（%d/5） - あなたの手番" % current_hand.size()
+				title_color = Color(0.45, 0.90, 0.55)
+		else:
+			hand_title = "あなたの手札（%d/5） - 相手の手番（思考中...）" % current_hand.size()
+			title_color = Color(0.70, 0.73, 0.80)
+	elif discard_mode:
+		hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % current_hand.size()
+		title_color = Color(1.0, 0.45, 0.40)
+	else:
+		hand_title = "%sの手札（%d/5）" % [
+			"先手" if current_player == 0 else "後手",
 			current_hand.size()
 		]
-	
+
 	draw_string(
 		ThemeDB.fallback_font,
 		Vector2(604, 135),
@@ -1317,9 +1484,8 @@ func _draw() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT,
 		540,
 		18,
-		Color(1.0, 0.45, 0.40) if discard_mode else Color(0.95, 0.97, 1.0)
+		title_color
 	)
-
 
 	if shared_test_mode and current_player != local_test_player:
 		draw_string(
@@ -1540,7 +1706,7 @@ func _draw() -> void:
 func square_rect(square: Vector2i) -> Rect2:
 	var col: int
 	var row: int
-	if shared_test_mode and _is_board_rotated():
+	if _is_board_rotated():
 		row = BOARD_SIZE - square.x
 		col = square.y - 1
 	else:
@@ -1691,6 +1857,11 @@ func end_turn() -> void:
 
 # 実際に手番を終了する処理
 func _complete_end_turn() -> void:
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "end_turn"
+		})
+
 	discard_mode = false
 
 	# 現在のプレイヤーの未使用コストを備蓄へ移す
@@ -1964,6 +2135,16 @@ func summon_piece(square: Vector2i) -> void:
 		"罠":
 			has_summoned_trap[current_player] = true
 
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		var send_data: Dictionary = {
+			"action": "summon",
+			"hand_index": selected_hand_index,
+			"square": [square.x, square.y]
+		}
+		if pending_wall_square.x != -1:
+			send_data["pending_wall_square"] = [pending_wall_square.x, pending_wall_square.y]
+		_send_p2p_action(send_data)
+
 	pending_wall_square = Vector2i(-1, -1)
 
 	hands[current_player].remove_at(selected_hand_index)
@@ -2092,6 +2273,13 @@ func try_destroy_wall(
 	# 破壊コストを支払う
 	if not spend_cost(current_player, destroy_cost):
 		return
+
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "destroy_wall",
+			"from": [from_square.x, from_square.y],
+			"wall": [wall_square.x, wall_square.y]
+		})
 
 	var wall_name: String = str(wall_piece.get("name", "壁"))
 	var wall_id: int = int(wall_piece.get("wall_id", -1))
@@ -2287,6 +2475,9 @@ func offer_promotion(
 	pending_promotion_square = square
 	pending_promotion_card_name = ""
 	pending_promotion_card_names = available_names.duplicate()
+	if P2PNetwork.is_p2p_match and current_player != P2PNetwork.local_player_id:
+		print("相手が成りの選択中である")
+		return
 	promotion_dialog.show_for_piece(str(piece.get("name", "駒")), available_names)
 
 
@@ -2294,12 +2485,22 @@ func offer_promotion(
 func _on_promotion_selected(promotion_name: String) -> void:
 	if not pending_promotion_card_names.has(promotion_name):
 		return
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "promotion",
+			"choice": promotion_name
+		})
 	pending_promotion_card_name = promotion_name
 	_on_promotion_confirmed()
 
 
 # 成りを選ばなかった場合
 func _on_promotion_declined() -> void:
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "promotion",
+			"choice": ""
+		})
 	pending_promotion_square = Vector2i(-1, -1)
 	pending_promotion_card_name = ""
 	pending_promotion_card_names.clear()
@@ -2508,6 +2709,12 @@ func _perform_archer_attack() -> void:
 	if not spend_cost(current_player, attack_cost):
 		return
 
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "archer_attack",
+			"square": [selected_square.x, selected_square.y]
+		})
+
 	has_moved_this_turn = true
 	selected_square = Vector2i(-1, -1)
 	selected_hand_index = -1
@@ -2572,6 +2779,13 @@ func _activate_selected_special_trap() -> void:
 	if not spend_cost(current_player, activation_cost):
 		print("罠の起動コストが不足しています。必要：%d" % activation_cost)
 		return
+
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "activate_trap",
+			"square": [selected_square.x, selected_square.y]
+		})
+
 	has_moved_this_turn = true
 	var no_traps: Array[Vector2i] = []
 	_begin_special_trap_activation(
@@ -2712,6 +2926,12 @@ func _handle_pending_special_trap_input(event: InputEvent) -> void:
 
 
 func _finish_pending_special_trap(chosen_square: Vector2i) -> void:
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "trap_target",
+			"chosen_square": [chosen_square.x, chosen_square.y]
+		})
+
 	var mode := pending_special_trap_mode
 	var trap_owner := pending_special_trap_owner
 	var candidates: Array[Vector2i] = pending_special_trap_candidates.duplicate()
@@ -2852,6 +3072,20 @@ func _input(event: InputEvent) -> void:
 		if not side_selection_complete:
 			return
 
+	# P2P対局時の操作権制御
+	if P2PNetwork.is_p2p_match:
+		if _p2p_disconnected:
+			return
+		# 伏兵・石落としの対象選択待ち
+		if pending_special_trap_waiting_for_target:
+			if pending_special_trap_owner != P2PNetwork.local_player_id:
+				return
+			_handle_pending_special_trap_input(event)
+			return
+		# 相手手番中は入力を無視する
+		if current_player != P2PNetwork.local_player_id:
+			return
+
 	if pending_special_trap_waiting_for_target:
 		_handle_pending_special_trap_input(event)
 		return
@@ -2938,7 +3172,13 @@ func _input(event: InputEvent) -> void:
 					var discarded_name: String = str(
 						discarded_card.get("name", "?")
 					)
-	
+
+					if P2PNetwork.is_p2p_match and not _is_remote_action:
+						_send_p2p_action({
+							"action": "discard",
+							"hand_index": hand_index
+						})
+
 					hands[current_player].remove_at(hand_index)
 					selected_hand_index = -1
 	
@@ -3059,6 +3299,14 @@ func _input(event: InputEvent) -> void:
 	
 	var move_from: Vector2i = selected_square
 	var move_to: Vector2i = square
+
+	if P2PNetwork.is_p2p_match and not _is_remote_action:
+		_send_p2p_action({
+			"action": "move",
+			"from": [move_from.x, move_from.y],
+			"to": [move_to.x, move_to.y]
+		})
+
 	var moving_piece: Dictionary = pieces[move_from].duplicate(true)
 	var triggered_traps: Array[Vector2i] = _get_traps_triggered_by_move(
 		move_from,
@@ -3089,6 +3337,8 @@ func _side_label(player: int) -> String:
 
 
 func _is_board_rotated() -> bool:
+	if P2PNetwork.is_p2p_match:
+		return P2PNetwork.local_player_id == 0
 	return shared_test_mode and local_test_player == 0
 
 
@@ -3370,6 +3620,12 @@ func _select_current_hand_by_number(hand_number: int) -> void:
 			)
 			queue_redraw()
 			return
+
+		if P2PNetwork.is_p2p_match and not _is_remote_action:
+			_send_p2p_action({
+				"action": "discard",
+				"hand_index": hand_index
+			})
 
 		current_hand.remove_at(hand_index)
 		selected_hand_index = -1

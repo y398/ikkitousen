@@ -1,6 +1,6 @@
 # ==================================================
 # ファイル名: TitleScreen.gd
-# 概要: ゲーム起動時のタイトル画面UI制御、対局開始・画面共有テスト・デッキ構築画面への遷移を管理するシーンスクリプトである
+# 概要: ゲーム起動時のタイトル画面UI制御、対局開始・画面共有テスト・ルームマッチ（P2P）・デッキ構築画面への遷移を管理するシーンスクリプトである
 # ==================================================
 
 extends Control
@@ -8,6 +8,7 @@ extends Control
 # 対局シーンのファイル名が異なる場合は、インスペクターから変更する
 @export_file("*.tscn") var game_scene_path: String = "res://scenes/MatchGame.tscn"
 @export_file("*.tscn") var deck_builder_scene_path: String = "res://scenes/DeckBuilder.tscn"
+@export_file("*.tscn") var lobby_scene_path: String = "res://scenes/P2PRoomLobby.tscn"
 
 var content_column: VBoxContainer
 var status_label: Label
@@ -93,8 +94,8 @@ func _build_interface() -> void:
 	deck_button.pressed.connect(_open_deck_builder)
 	content_column.add_child(deck_button)
 
-	var room_button := _make_menu_button("ルームマッチ（今後実装）", "友人とのオンライン対戦")
-	room_button.disabled = true
+	var room_button := _make_menu_button("ルームマッチ（P2P）", "手動シグナリングによる友人とのオンライン対戦")
+	room_button.pressed.connect(_open_room_lobby)
 	content_column.add_child(room_button)
 
 	var separator := HSeparator.new()
@@ -102,7 +103,7 @@ func _build_interface() -> void:
 	content_column.add_child(separator)
 
 	status_label = Label.new()
-	status_label.text = "現在はローカル対局とデッキ構築を利用できます。"
+	status_label.text = "一人用対局、デッキ構築、ルームマッチを利用できます"
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.add_theme_font_size_override("font_size", 13)
@@ -161,7 +162,7 @@ func _make_menu_button(button_title: String, description: String) -> Button:
 func _update_layout() -> void:
 	if content_column == null:
 		return
-	# 画面が狭い場合は余白を除いた幅に合わせ、広い場合は最大460pxに抑える。
+	# 画面が狭い場合は余白を除いた幅に合わせ、広い場合は最大460pxに抑える
 	var available_width := maxf(0.0, size.x - 56.0)
 	content_column.custom_minimum_size.x = minf(460.0, available_width)
 
@@ -172,6 +173,10 @@ func _open_game() -> void:
 
 func _open_deck_builder() -> void:
 	_open_scene(deck_builder_scene_path, "デッキ構築シーン")
+
+
+func _open_room_lobby() -> void:
+	_open_scene(lobby_scene_path, "ルームマッチロビー")
 
 
 func _open_scene(scene_path: String, scene_label: String) -> void:

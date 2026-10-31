@@ -11,3 +11,4 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
 game_scene_path = "uid://6o816p4rhh3n"
+lobby_scene_path = "res://scenes/P2PRoomLobby.tscn"
