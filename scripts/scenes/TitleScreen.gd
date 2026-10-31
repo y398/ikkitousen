@@ -1,6 +1,11 @@
+# ==================================================
+# ファイル名: TitleScreen.gd
+# 概要: ゲーム起動時のタイトル画面UI制御、対局開始・画面共有テスト・デッキ構築画面への遷移を管理するシーンスクリプトである
+# ==================================================
+
 extends Control
 
-# 対局シーンのファイル名が異なる場合は、インスペクターから変更してください。
+# 対局シーンのファイル名が異なる場合は、インスペクターから変更する
 @export_file("*.tscn") var game_scene_path: String = "res://scenes/MatchGame.tscn"
 @export_file("*.tscn") var deck_builder_scene_path: String = "res://scenes/DeckBuilder.tscn"
 

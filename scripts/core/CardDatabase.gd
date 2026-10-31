@@ -1,9 +1,12 @@
+# ==================================================
+# ファイル名: CardDatabase.gd
+# 概要: ゲーム内に登場する全カード（兵・壁・罠・成駒）の定数データおよび画像パス情報等を一元管理するデータベースである
+# ==================================================
+
 extends RefCounted
 
-const CardDataResource = preload("res://scripts/core/CardData.gd")
-
-# カードの基本情報とデッキ構築ルールを一元管理する。
-# max_copies: -1 は同名カードの枚数制限なしを表す。
+# カードの基本情報とデッキ構築ルールを一元管理する
+# max_copies: -1 は同名カードの枚数制限なしを表す
 const CARD_DATA: Dictionary = {
 	"歩": {
 		"category": "兵",
@@ -51,7 +54,8 @@ const CARD_DATA: Dictionary = {
 		"movement_type": "silver",
 		"can_move_forward": true,
 		"can_move_backward": true,
-		"is_sliding": false
+		"is_sliding": false,
+		"promotion_card": "成銀"
 	},
 	"金": {
 		"category": "兵",
@@ -284,6 +288,9 @@ const CARD_DATA: Dictionary = {
 		"deckcost": 0,
 		"max_copies": 2,
 		"movement_type": "horse",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": true,
 		"wall_length": 1,
 		"destroy_cost": 0,
 		"blocks_knight": false,
@@ -296,6 +303,9 @@ const CARD_DATA: Dictionary = {
 		"deckcost": 0,
 		"max_copies": 2,
 		"movement_type": "dragon",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": true,
 		"wall_length": 1,
 		"destroy_cost": 0,
 		"blocks_knight": false,
@@ -304,66 +314,44 @@ const CARD_DATA: Dictionary = {
 }
 
 
-# 指定したカード名の情報を返す。
+# 指定したカード名の情報を返す
 static func get_card(card_name: String) -> Dictionary:
 	if not CARD_DATA.has(card_name):
 		return {}
 
 	var definition: Dictionary = CARD_DATA[card_name]
-	var card_data = CardDataResource.new()
-	card_data.card_name = card_name
-	card_data.category = str(definition.get("category", ""))
-	card_data.cost = int(definition.get("cost", 0))
-	card_data.deckcost = int(definition.get("deckcost", 0))
-	card_data.sort_order = int(definition.get("sort_order", 9999))
-	card_data.max_copies = int(definition.get("max_copies", 2))
-	card_data.movement_type = str(definition.get("movement_type", "none"))
-	card_data.can_move_forward = bool(definition.get("can_move_forward", true))
-	card_data.can_move_backward = bool(definition.get("can_move_backward", true))
-	card_data.is_sliding = bool(definition.get("is_sliding", false))
-	card_data.wall_length = int(definition.get("wall_length", 1))
-	card_data.destroy_cost = int(definition.get("destroy_cost", 0))
-	card_data.blocks_knight = bool(definition.get("blocks_knight", false))
-	card_data.activation_cost = int(definition.get("activation_cost", 0))
-	card_data.attack_cost = int(definition.get("attack_cost", 0))
-	card_data.trap_effect = str(definition.get("trap_effect", ""))
-	card_data.on_summon_effect = str(definition.get("on_summon_effect", ""))
-	card_data.effect_text = str(definition.get("effect_text", ""))
-	card_data.promotion_card = str(definition.get("promotion_card", ""))
+	var promotion_card: String = str(definition.get("promotion_card", ""))
 	var promotion_cards: Array[String] = []
 	var raw_promotion_cards: Variant = definition.get("promotion_cards", [])
 	if raw_promotion_cards is Array:
 		for raw_promotion_name in raw_promotion_cards:
 			promotion_cards.append(str(raw_promotion_name))
-	if promotion_cards.is_empty() and not card_data.promotion_card.is_empty():
-		promotion_cards.append(card_data.promotion_card)
-	card_data.promotion_cards = promotion_cards
-	card_data.promotes_from = str(definition.get("promotes_from", ""))
-	card_data.image_path = get_card_image_path(card_name)
+	if promotion_cards.is_empty() and not promotion_card.is_empty():
+		promotion_cards.append(promotion_card)
 
 	return {
-		"name": card_data.card_name,
-		"image_path": card_data.image_path,
-		"category": card_data.category,
-		"sort_order": card_data.sort_order,
-		"cost": card_data.cost,
-		"deckcost": card_data.deckcost,
-		"max_copies": card_data.max_copies,
-		"activation_cost": card_data.activation_cost,
-		"attack_cost": card_data.attack_cost,
-		"on_summon_effect": card_data.on_summon_effect,
-		"effect_text": card_data.effect_text,
-		"movement_type": card_data.movement_type,
-		"can_move_forward": card_data.can_move_forward,
-		"can_move_backward": card_data.can_move_backward,
-		"is_sliding": card_data.is_sliding,
-		"wall_length": card_data.wall_length,
-		"destroy_cost": card_data.destroy_cost,
-		"blocks_knight": card_data.blocks_knight,
-		"trap_effect": card_data.trap_effect,
-		"promotion_card": card_data.promotion_card,
-		"promotion_cards": card_data.promotion_cards.duplicate(),
-		"promotes_from": card_data.promotes_from
+		"name": card_name,
+		"image_path": get_card_image_path(card_name),
+		"category": str(definition.get("category", "")),
+		"sort_order": int(definition.get("sort_order", 9999)),
+		"cost": int(definition.get("cost", 0)),
+		"deckcost": int(definition.get("deckcost", 0)),
+		"max_copies": int(definition.get("max_copies", 2)),
+		"activation_cost": int(definition.get("activation_cost", 0)),
+		"attack_cost": int(definition.get("attack_cost", 0)),
+		"on_summon_effect": str(definition.get("on_summon_effect", "")),
+		"effect_text": str(definition.get("effect_text", "")),
+		"movement_type": str(definition.get("movement_type", "none")),
+		"can_move_forward": bool(definition.get("can_move_forward", true)),
+		"can_move_backward": bool(definition.get("can_move_backward", true)),
+		"is_sliding": bool(definition.get("is_sliding", false)),
+		"wall_length": int(definition.get("wall_length", 1)),
+		"destroy_cost": int(definition.get("destroy_cost", 0)),
+		"blocks_knight": bool(definition.get("blocks_knight", false)),
+		"trap_effect": str(definition.get("trap_effect", "")),
+		"promotion_card": promotion_card,
+		"promotion_cards": promotion_cards,
+		"promotes_from": str(definition.get("promotes_from", ""))
 	}
 
 

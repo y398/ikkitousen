@@ -1,12 +1,17 @@
+# ==================================================
+# ファイル名: AttackRules.gd
+# 概要: 弓手および成弓による正面2マス先の遠隔攻撃判定と対象マスの算出を行うルールクラスである
+# ==================================================
+
 extends RefCounted
 
-# 弓手または成弓かどうか。旧データにも対応するため名前も見る。
+# 弓手または成弓かどうか　旧データにも対応するため名前も見る
 static func is_archer(piece: Dictionary) -> bool:
 	return str(piece.get("movement_type", "")) in ["archer", "promoted_archer"] or str(piece.get("name", "")) in ["弓手", "成弓"]
 
 
-# 弓手・成弓の攻撃先。正面2マス先にいる敵駒だけを返す。
-# 中間のマスは「一つ飛ばし」のため、ここでは対象確認に使わない。
+# 弓手・成弓の攻撃先　正面2マス先にいる敵駒だけを返す
+# 中間のマスは「一つ飛ばし」のため、ここでは対象確認に使わない
 static func get_archer_target_square(
 	pieces: Dictionary,
 	archer_square: Vector2i,

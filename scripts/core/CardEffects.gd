@@ -1,7 +1,12 @@
+# ==================================================
+# ファイル名: CardEffects.gd
+# 概要: 旗本などの召喚時効果（山札公開・手札獲得など）の個別処理と結果判定を行うクラスである
+# ==================================================
+
 extends RefCounted
 
-# カード固有の効果を、対局状態を直接変更せずに判定する。
-# 戻り値の action を受けて main.gd 側が山札・手札を更新する。
+# カード固有の効果を、対局状態を直接変更せずに判定する
+# 戻り値の action を受けて main.gd 側が山札・手札を更新する
 static func resolve_on_summon_effect(effect_id: String, top_card: Dictionary) -> Dictionary:
 	match effect_id:
 		"reveal_top_card":

@@ -1,3 +1,8 @@
+# ==================================================
+# ファイル名: DeckLibrary.gd
+# 概要: ユーザーの作成・保存したデッキデータのファイル入出力（JSON形式）や初期プリセットデッキの提供を行うライブラリである
+# ==================================================
+
 extends RefCounted
 
 const SAVE_PATH := "user://deck_save.json"
@@ -5,8 +10,8 @@ const FORMAT_VERSION := 3
 const CardDatabase = preload("res://scripts/core/CardDatabase.gd")
 const DeckRules = preload("res://scripts/core/DeckRules.gd")
 
-# 保存ファイルがまだない場合に使用する、対局可能な初期デッキを2組用意する。
-# デッキ構築画面から編集・保存すれば、通常の保存デッキとして扱われる。
+# 保存ファイルがまだない場合に使用する、対局可能な初期デッキを2組用意する
+# デッキ構築画面から編集・保存すれば、通常の保存デッキとして扱われる
 static func _default_main_deck_one() -> Array:
 	var cards: Array = []
 	for _i in range(6):

@@ -1,3 +1,8 @@
+# ==================================================
+# ファイル名: CheckRules.gd
+# 概要: 盤面上の王手状態の検出および特定マスへの敵駒の利きを判定するルールクラスである
+# ==================================================
+
 extends RefCounted
 
 const MovementRules = preload("res://scripts/rules/MovementRules.gd")
@@ -79,30 +84,36 @@ static func is_square_attacked(
 	return false
 
 
-# 香・角・飛の通り道が塞がれていないか
+# 直線移動（香・角・飛・馬・龍等）の通り道が塞がれていないか判定する
 static func _path_is_clear(
 	pieces: Dictionary,
 	from_square: Vector2i,
 	to_square: Vector2i
 ) -> bool:
 	var piece: Dictionary = pieces[from_square]
-	var piece_name: String = str(
-		piece.get("name", "")
-	)
+	var is_sliding: bool = bool(piece.get("is_sliding", false))
+
+	# 古いデータや駒名定義との互換性を確保する
+	if not is_sliding:
+		var piece_name: String = str(piece.get("name", ""))
+		var movement_type: String = str(piece.get("movement_type", ""))
+		is_sliding = piece_name in ["香", "角", "飛", "馬", "龍"] or movement_type in ["lance", "bishop", "rook", "horse", "dragon"]
 
 	# 直線移動をする駒以外は経路確認不要
-	if piece_name not in ["香", "角", "飛","馬","龍"]:
+	if not is_sliding:
 		return true
 
 	var dx: int = to_square.x - from_square.x
 	var dy: int = to_square.y - from_square.y
 
+	# 馬や龍の1マス移動時は遮る中間マスが存在しないため通過可能である
+	if maxi(absi(dx), absi(dy)) <= 1:
+		return true
+
 	var step_x: int = signi(dx)
 	var step_y: int = signi(dy)
 
-	var pos: Vector2i = (
-		from_square + Vector2i(step_x, step_y)
-	)
+	var pos: Vector2i = from_square + Vector2i(step_x, step_y)
 
 	while pos != to_square:
 		if pieces.has(pos):

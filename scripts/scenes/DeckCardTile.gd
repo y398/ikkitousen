@@ -1,3 +1,8 @@
+# ==================================================
+# ファイル名: DeckCardTile.gd
+# 概要: デッキ構築画面内のカードタイルUI（カード画像・枚数表示・ドラッグ＆ドロップ開始・クリックシグナル）を制御するクラスである
+# ==================================================
+
 extends Button
 
 signal clicked(card_name: String, source_zone: String, list_type: String, source_index: int)

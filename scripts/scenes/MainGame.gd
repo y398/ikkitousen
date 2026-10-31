@@ -1,4 +1,9 @@
 
+# ==================================================
+# ファイル名: MainGame.gd
+# 概要: 対局の全般進行（盤面描画・手札管理・コスト/備蓄計算・駒移動・召喚・罠処理・画面共有モード）を統括するメインゲームシーンクラスである
+# ==================================================
+
 extends Node2D
 
 const CardDatabase = preload("res://scripts/core/CardDatabase.gd")
@@ -26,6 +31,8 @@ const HAND_CARD_SIZE: Vector2 = Vector2(120.0, 168.0)
 const HAND_CARD_GAP: float = 8.0
 const HAND_CARD_ORIGIN: Vector2 = Vector2(604.0, 155.0)
 const USE_TEST_SETUP: bool = false
+# 備蓄可能な最大コスト数である
+const MAX_RESERVES: int = 3
 
 var pieces: Dictionary = {}
 var hands: Array = [[], []]
@@ -789,9 +796,9 @@ func _get_piece_display_label(piece: Dictionary) -> String:
 			return piece_name
 
 
-# 将棋の駒形を描画する。先手は画面上向き、後手は画面下向きに尖らせる。
-func _draw_shogi_piece(center: Vector2, owner: int, border_color: Color, label: String) -> void:
-	var forward_sign: float = -1.0 if owner == 0 else 1.0
+# 将棋の駒形を描画する　先手は画面上向き、後手は画面下向きに尖らせる
+func _draw_shogi_piece(center: Vector2, piece_owner: int, border_color: Color, label: String) -> void:
+	var forward_sign: float = -1.0 if piece_owner == 0 else 1.0
 	var points := PackedVector2Array([
 		center + Vector2(0.0, 22.0 * forward_sign),
 		center + Vector2(20.0, 5.0 * forward_sign),
@@ -800,7 +807,7 @@ func _draw_shogi_piece(center: Vector2, owner: int, border_color: Color, label: 
 		center + Vector2(-20.0, 5.0 * forward_sign)
 	])
 	var fill_color: Color = Color(0.91, 0.84, 0.68)
-	if owner == 1:
+	if piece_owner == 1:
 		fill_color = Color(0.92, 0.78, 0.73)
 	draw_colored_polygon(points, fill_color)
 
@@ -875,16 +882,69 @@ func _draw() -> void:
 		Color(0.90, 0.93, 0.98)
 	)
 
-	draw_string(
-		ThemeDB.fallback_font,
-		Vector2(340, 80),
-		"コスト：先手 %d（備蓄%d）/ 後手 %d（備蓄%d）"
-		% [costs[0], reserves[0], costs[1], reserves[1]],
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1,
-		35,
-		Color(0.90, 0.93, 0.98)
-	)
+	# コスト・備蓄・次回復量および現在手番の下線描画
+	var font := ThemeDB.fallback_font
+	var base_y := 80.0
+	var label_size := 26
+	var sub_size := 18
+	var cur_x := 340.0
+
+	# 「コスト：」プレフィックスを描画する
+	var header_text := "コスト："
+	draw_string(font, Vector2(cur_x, base_y), header_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.90, 0.93, 0.98))
+	cur_x += font.get_string_size(header_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	# 先手情報：コスト、次ターン回復量、備蓄最大値を描画する
+	var sente_start_x := cur_x
+	var sente_rec := _calculate_expected_recovery(0)
+	var sente_main_text := "先手 %d" % costs[0]
+	var sente_rec_text := " (+%d)" % sente_rec
+	var sente_sub_text := "（備蓄%d/%d）" % [reserves[0], MAX_RESERVES]
+
+	var sente_color := Color(0.40, 0.72, 1.0) if current_player == 0 else Color(0.75, 0.82, 0.92)
+	draw_string(font, Vector2(cur_x, base_y), sente_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, sente_color)
+	cur_x += font.get_string_size(sente_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	# 次にもらえるコストを小さめの文字で描画する
+	draw_string(font, Vector2(cur_x, base_y), sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size, Color(0.45, 0.90, 0.55))
+	cur_x += font.get_string_size(sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size).x
+
+	draw_string(font, Vector2(cur_x, base_y), sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	cur_x += font.get_string_size(sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+	var sente_end_x := cur_x
+
+	# 先手の手番時は先手部分の下に分かりやすい下線を引く
+	if current_player == 0 and not game_over:
+		var underline_y := base_y + 6.0
+		draw_line(Vector2(sente_start_x, underline_y), Vector2(sente_end_x, underline_y), Color(0.35, 0.70, 1.0), 3.0)
+
+	# 区切り線を描画する
+	var sep_text := "  /  "
+	draw_string(font, Vector2(cur_x, base_y), sep_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.50, 0.55, 0.65))
+	cur_x += font.get_string_size(sep_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	# 後手情報：コスト、次ターン回復量、備蓄最大値を描画する
+	var gote_start_x := cur_x
+	var gote_rec := _calculate_expected_recovery(1)
+	var gote_main_text := "後手 %d" % costs[1]
+	var gote_rec_text := " (+%d)" % gote_rec
+	var gote_sub_text := "（備蓄%d/%d）" % [reserves[1], MAX_RESERVES]
+
+	var gote_color := Color(1.0, 0.45, 0.45) if current_player == 1 else Color(0.75, 0.82, 0.92)
+	draw_string(font, Vector2(cur_x, base_y), gote_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, gote_color)
+	cur_x += font.get_string_size(gote_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	draw_string(font, Vector2(cur_x, base_y), gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size, Color(0.45, 0.90, 0.55))
+	cur_x += font.get_string_size(gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size).x
+
+	draw_string(font, Vector2(cur_x, base_y), gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	cur_x += font.get_string_size(gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+	var gote_end_x := cur_x
+
+	# 後手の手番時は後手部分の下に分かりやすい下線を引く
+	if current_player == 1 and not game_over:
+		var underline_y := base_y + 6.0
+		draw_line(Vector2(gote_start_x, underline_y), Vector2(gote_end_x, underline_y), Color(1.0, 0.45, 0.45), 3.0)
 
 	# 旗本の公開情報など、両プレイヤーに見せる通知。
 	if not public_notice.is_empty():
@@ -919,31 +979,33 @@ func _draw() -> void:
 	# 領地（2五・8五）を明示する。
 	_draw_territory_markers()
 
-	# 筋の番号
+	# 筋の番号（盤面反転時は左右も反転する）
+	var is_rotated := _is_board_rotated()
 	for col in range(BOARD_SIZE):
+		var file_text: String = str(col + 1) if is_rotated else str(BOARD_SIZE - col)
 		draw_string(
 			ThemeDB.fallback_font,
 			BOARD_ORIGIN + Vector2(
 				col * CELL_SIZE + 25,
 				-12
 			),
-			str(BOARD_SIZE - col),
+			file_text,
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
 			18,
 			Color(0.92, 0.94, 0.98)
 		)
 
-
-	# 段の番号（漢数字）
+	# 段の番号（漢数字、盤面反転時は上下も反転する）
 	for row in range(BOARD_SIZE):
+		var rank_text: String = RANK_KANJI[BOARD_SIZE - 1 - row] if is_rotated else RANK_KANJI[row]
 		draw_string(
 			ThemeDB.fallback_font,
 			BOARD_ORIGIN + Vector2(
 				-25,
 				row * CELL_SIZE + 36
 			),
-			RANK_KANJI[row],
+			rank_text,
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
 			18,
@@ -969,14 +1031,14 @@ func _draw() -> void:
 	# 選択したカードを配置できる空きマスを表示する。
 	_draw_summon_highlights()
 
-	# 駒。兵・王・成は将棋の駒形にし、尖った側を進行方向に向ける。
-	# 壁・罠は従来の円形表示を維持する。
+	# 駒　兵・王・成は将棋の駒形にし、尖った側を進行方向に向ける
+	# 壁・罠は従来の円形表示を維持する
 	for square in pieces:
 		var piece: Dictionary = pieces[square]
 		var center: Vector2 = square_rect(square).get_center()
 		var category: String = str(piece.get("category", ""))
 		var piece_name: String = str(piece.get("name", "?"))
-		var owner: int = int(piece.get("owner", -1))
+		var piece_owner: int = int(piece.get("owner", -1))
 
 		var is_hidden_trap: bool = (
 			category == "罠"
@@ -984,7 +1046,7 @@ func _draw() -> void:
 		)
 
 		var piece_color: Color = Color(0.12, 0.32, 0.72)
-		if owner == 1:
+		if piece_owner == 1:
 			piece_color = Color(0.72, 0.18, 0.20)
 
 		var display_name: String = _get_piece_display_label(piece)
@@ -998,7 +1060,7 @@ func _draw() -> void:
 		)
 
 		if is_shogi_piece and not is_hidden_trap:
-			_draw_shogi_piece(center, owner, piece_color, display_name)
+			_draw_shogi_piece(center, piece_owner, piece_color, display_name)
 		else:
 			draw_circle(center, 20.0, piece_color)
 			draw_string(
@@ -1256,28 +1318,8 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(950, 630), "F2：成デッキ出力 / Space：手番終了", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
 	else:
 		draw_string(ThemeDB.fallback_font, Vector2(950, 580), "カードクリック：手札選択", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-		draw_string(ThemeDB.fallback_font, Vector2(950, 605), "自陣空きマス：召喚", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
+		draw_string(ThemeDB.fallback_font, Vector2(950, 605), "盤面空きマス：召喚・駒移動", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
 		draw_string(ThemeDB.fallback_font, Vector2(950, 630), "Esc：選択解除 / Space：手番終了", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.86, 0.92))
-	
-	draw_string(
-		ThemeDB.fallback_font,
-		Vector2(950, 605),
-		"盤面をクリック：召喚・移動",
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1,
-		14,
-		Color(0.82, 0.86, 0.92)
-	)
-	
-	draw_string(
-		ThemeDB.fallback_font,
-		Vector2(950, 630),
-		"Esc：取消 / Space：手番終了",
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1,
-		14,
-		Color(0.82, 0.86, 0.92)
-	)
 	
 func square_rect(square: Vector2i) -> Rect2:
 	var col: int
@@ -1302,7 +1344,7 @@ func hand_card_rect(hand_index: int) -> Rect2:
 
 	# 0～3枚目は1段目、4枚目以降は2段目
 	var column: int = hand_index % CARDS_PER_ROW
-	var row: int = int(hand_index / CARDS_PER_ROW)
+	var row: int = floori(float(hand_index) / float(CARDS_PER_ROW))
 
 	var card_position := Vector2(
 		604.0 + column * (HAND_CARD_SIZE.x + HAND_CARD_GAP),
@@ -1310,6 +1352,28 @@ func hand_card_rect(hand_index: int) -> Rect2:
 	)
 
 	return Rect2(card_position, HAND_CARD_SIZE)
+
+
+# 次の自ターン開始時に獲得できる予想コスト回復量を計算する
+func _calculate_expected_recovery(player: int) -> int:
+	var recovery: int = 2
+
+	# 領地マス（(5,2), (5,8)）にある自軍の兵・王・成1体につき+1
+	for square in pieces:
+		var piece: Dictionary = pieces[square]
+		if int(piece.get("owner", -1)) != player:
+			continue
+		var category: String = str(piece.get("category", ""))
+		if category != "兵" and category != "王" and category != "成":
+			continue
+		if square == Vector2i(5, 2) or square == Vector2i(5, 8):
+			recovery += 1
+
+	# 王手を受けている側には救済ボーナス+1
+	if CheckRules.is_in_check(pieces, player):
+		recovery += 1
+
+	return recovery
 
 
 func recover_cost(player: int) -> void:
@@ -1357,7 +1421,7 @@ func recover_cost(player: int) -> void:
 # ターン終了時に余ったコストを備蓄へ移す
 func bank_unused_cost(player: int) -> void:
 	var unused: int = costs[player]
-	var capacity: int = maxi(0, 3 - reserves[player])
+	var capacity: int = maxi(0, MAX_RESERVES - reserves[player])
 	var banked: int = mini(unused, capacity)
 	var discarded: int = unused - banked
 
@@ -1739,17 +1803,23 @@ func can_move_shape(
 	return MovementRules.can_move_shape(from_square, to_square, piece)
 
 func is_sliding_piece(piece_name: String) -> bool:
-	return piece_name in ["香", "角", "飛","馬","龍"]
+	return bool(CardDatabase.get_card(piece_name).get("is_sliding", false)) or piece_name in ["香", "角", "飛", "馬", "龍"]
 
 
 func path_is_clear(from: Vector2i, to: Vector2i) -> bool:
-	var name: String = str(pieces[from].get("name", ""))
+	var piece_data: Dictionary = pieces[from]
+	var moving_piece_name: String = str(piece_data.get("name", ""))
 
-	if not is_sliding_piece(name):
+	var is_sliding: bool = bool(piece_data.get("is_sliding", false)) or is_sliding_piece(moving_piece_name)
+	if not is_sliding:
 		return true
 
 	var dx: int = to.x - from.x
 	var dy: int = to.y - from.y
+
+	# 馬や龍の1マス移動時は遮る中間マスが存在しないため通過可能である
+	if maxi(absi(dx), absi(dy)) <= 1:
+		return true
 
 	var step_x: int = signi(dx)
 	var step_y: int = signi(dy)
@@ -1849,7 +1919,7 @@ func try_destroy_wall(
 func is_knight_blocked_by_fence(
 	from_square: Vector2i,
 	to_square: Vector2i,
-	moving_piece: Dictionary
+	_moving_piece: Dictionary
 ) -> bool:
 	return WallRules.blocks_path(pieces, from_square, to_square)
 
@@ -2420,7 +2490,7 @@ func _handle_pending_special_trap_input(event: InputEvent) -> void:
 	var row := int(relative.y / CELL_SIZE)
 	if row < 0 or row >= BOARD_SIZE or col < 0 or col >= BOARD_SIZE:
 		return
-	var chosen_square := Vector2i(row + 1, BOARD_SIZE - col)
+	var chosen_square := _screen_cell_to_square(row, col)
 	if pending_special_trap_candidates.has(chosen_square):
 		_finish_pending_special_trap(chosen_square)
 
@@ -2803,7 +2873,7 @@ func _side_label(player: int) -> String:
 
 
 func _is_board_rotated() -> bool:
-	return SHARED_TEST_MODE and local_test_player == 0
+	return shared_test_mode and local_test_player == 0
 
 
 # 表示上の行・列から、ゲーム内部の論理座標（段x・筋y）へ変換する。
@@ -2991,7 +3061,7 @@ func _on_local_side_selected(player: int) -> void:
 # そのため、画面共有テストで担当陣営を切り替えても色の割り当ては入れ替わらない。
 
 func _print_local_hand_and_cost(reason: String) -> void:
-	if not SHARED_TEST_MODE:
+	if not shared_test_mode:
 		return
 
 	print("")
@@ -3020,7 +3090,7 @@ func _print_local_hand_and_cost(reason: String) -> void:
 # 手札・コストはF2には含めず、ドロー時の出力を使う。
 
 func _print_local_promotion_deck() -> void:
-	if not SHARED_TEST_MODE:
+	if not shared_test_mode:
 		return
 
 	print("")
@@ -3117,5 +3187,3 @@ func _select_current_hand_by_number(hand_number: int) -> void:
 	selected_square = Vector2i(-1, -1)
 	pending_wall_square = Vector2i(-1, -1)
 	queue_redraw()
-
-

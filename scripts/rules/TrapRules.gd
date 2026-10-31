@@ -1,9 +1,14 @@
+# ==================================================
+# ファイル名: TrapRules.gd
+# 概要: 落とし穴・伏兵・石落とし等の罠カードの自動発動・手動起動判定および対象候補の算出を行うルールクラスである
+# ==================================================
+
 extends RefCounted
 
 const SPECIAL_EFFECT_IDS: Array[String] = ["ambush_three_squares", "stone_drop_front_two"]
 
 
-# 罠の効果IDを取得。古い保存データでもカード名から補完する。
+# 罠の効果IDを取得　古い保存データでもカード名から補完する
 static func get_effect_id(trap_piece: Dictionary) -> String:
 	var effect_id := str(trap_piece.get("trap_effect", ""))
 	if not effect_id.is_empty():
@@ -56,7 +61,7 @@ static func get_triggered_traps(
 	pieces: Dictionary,
 	from_square: Vector2i,
 	to_square: Vector2i,
-	moving_piece: Dictionary,
+	_moving_piece: Dictionary,
 	board_size: int = 9
 ) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []

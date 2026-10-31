@@ -1,3 +1,8 @@
+# ==================================================
+# ファイル名: DeckBuilder.gd
+# 概要: デッキ構築画面のUI制御、カードプールのドラッグ＆ドロップ、バリデーション表示およびデッキ保存・読み込みを行うシーンスクリプトである
+# ==================================================
+
 extends Control
 
 const CardDatabase = preload("res://scripts/core/CardDatabase.gd")
@@ -9,8 +14,8 @@ const DropZoneScript = preload("res://scripts/scenes/DeckDropZone.gd")
 const DECK_SAVE_PATH := "user://deck_save.json"
 const TITLE_SCENE_PATH := "res://scenes/TitleScreen.tscn"
 
-# 右側は常に 5×4 のメインデッキと 5×1 の成デッキを表示する。
-# カード画像の縦横比（約0.715）に合わせたサイズ。
+# 右側は常に 5×4 のメインデッキと 5×1 の成デッキを表示する
+# カード画像の縦横比（約0.715）に合わせたサイズ
 const POOL_TILE_SIZE := Vector2(96.0, 134.0)
 const DECK_TILE_SIZE := Vector2(72.0, 101.0)
 const GRID_GAP := 5

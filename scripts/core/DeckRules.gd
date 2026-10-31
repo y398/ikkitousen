@@ -1,8 +1,13 @@
+# ==================================================
+# ファイル名: DeckRules.gd
+# 概要: メインデッキ（20枚・デッキコスト20）および成デッキ（5枚）の構築バリデーションルールを判定するクラスである
+# ==================================================
+
 extends RefCounted
 
 const CardDatabase = preload("res://scripts/core/CardDatabase.gd")
 
-# メインデッキ：20枚、デッキコスト合計20、兵・壁・罠のみ。
+# メインデッキ：20枚、デッキコスト合計20、兵・壁・罠のみ
 static func validate_main_deck(card_names: Array) -> Dictionary:
 	var errors: Array[String] = []
 	var counts: Dictionary = {}
