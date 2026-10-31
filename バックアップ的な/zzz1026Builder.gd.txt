@@ -1,0 +1,574 @@
+extends Control
+
+const CardDatabase = preload("res://CardDatabase.gd")
+const DeckRules = preload("res://DeckRules.gd")
+const DECK_SAVE_PATH := "user://deck_save.json"
+const SAVE_FORMAT_VERSION := 2
+const PROFILE_MAIN := "main"
+const PROFILE_SUB := "sub"
+const TITLE_SCENE_PATH := "res://TitleScreen.tscn"
+
+var main_deck: Array[String] = []
+var promotion_deck: Array[String] = []
+var profiles: Dictionary = {}
+var active_profile_id: String = PROFILE_MAIN
+var profile_selector: OptionButton
+
+var main_available_list: VBoxContainer
+var main_deck_list: VBoxContainer
+var main_summary_label: Label
+var main_validation_label: Label
+
+var promotion_available_list: VBoxContainer
+var promotion_deck_list: VBoxContainer
+var promotion_summary_label: Label
+var promotion_validation_label: Label
+var save_status_label: Label
+
+
+func _ready() -> void:
+	profiles = _make_empty_profiles()
+	_build_interface()
+	if FileAccess.file_exists(DECK_SAVE_PATH):
+		_load_decks()
+	else:
+		_load_profile_into_editor()
+		_refresh_main_deck()
+		_refresh_promotion_deck()
+		save_status_label.text = "新規デッキです。編集対象を切り替えて、メイン用・サブ用をそれぞれ作成してください。"
+
+
+func _build_interface() -> void:
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var root_column := VBoxContainer.new()
+	root_column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root_column.add_theme_constant_override("separation", 10)
+	add_child(root_column)
+
+	var title := Label.new()
+	title.text = "デッキ作成"
+	title.add_theme_font_size_override("font_size", 26)
+	root_column.add_child(title)
+
+	var note := Label.new()
+	note.text = "編集対象ごとに、メインデッキ20枚と成デッキ5枚を作成します。先手はメイン、後手はサブを使用します。未完成の下書きも保存できます。"
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root_column.add_child(note)
+
+	var navigation_row := HBoxContainer.new()
+	root_column.add_child(navigation_row)
+	var title_button := Button.new()
+	title_button.text = "タイトルへ戻る"
+	title_button.pressed.connect(_return_to_title)
+	navigation_row.add_child(title_button)
+
+	var profile_row := HBoxContainer.new()
+	root_column.add_child(profile_row)
+	var profile_label := Label.new()
+	profile_label.text = "編集対象："
+	profile_row.add_child(profile_label)
+	profile_selector = OptionButton.new()
+	profile_selector.add_item("メイン用デッキ（先手）")
+	profile_selector.add_item("サブ用デッキ（後手）")
+	profile_selector.select(0)
+	profile_selector.item_selected.connect(_on_profile_selected)
+	profile_row.add_child(profile_selector)
+
+	var file_controls := HBoxContainer.new()
+	root_column.add_child(file_controls)
+
+	var save_button := Button.new()
+	save_button.text = "メイン・サブを保存"
+	save_button.pressed.connect(_save_decks)
+	file_controls.add_child(save_button)
+
+	var load_button := Button.new()
+	load_button.text = "メイン・サブを読み込み"
+	load_button.pressed.connect(_load_decks)
+	file_controls.add_child(load_button)
+
+	save_status_label = Label.new()
+	save_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root_column.add_child(save_status_label)
+
+	var tabs := TabContainer.new()
+	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root_column.add_child(tabs)
+
+	_build_main_tab(tabs)
+	_build_promotion_tab(tabs)
+
+
+func _return_to_title() -> void:
+	var error := get_tree().change_scene_to_file(TITLE_SCENE_PATH)
+	if error != OK:
+		push_error("タイトル画面への移動に失敗しました。エラーコード：%d" % error)
+
+
+func _build_main_tab(tabs: TabContainer) -> void:
+	var page := HBoxContainer.new()
+	page.name = "メインデッキ"
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(page)
+
+	var available_panel := VBoxContainer.new()
+	available_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_panel.size_flags_stretch_ratio = 1.0
+	page.add_child(available_panel)
+	var available_title := Label.new()
+	available_title.text = "追加できるカード"
+	available_title.add_theme_font_size_override("font_size", 18)
+	available_panel.add_child(available_title)
+	var available_scroll := ScrollContainer.new()
+	available_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	available_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_panel.add_child(available_scroll)
+	main_available_list = VBoxContainer.new()
+	main_available_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_scroll.add_child(main_available_list)
+
+	var deck_panel := VBoxContainer.new()
+	deck_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_panel.size_flags_stretch_ratio = 1.0
+	page.add_child(deck_panel)
+	var deck_title := Label.new()
+	deck_title.text = "現在のメインデッキ"
+	deck_title.add_theme_font_size_override("font_size", 18)
+	deck_panel.add_child(deck_title)
+	main_summary_label = Label.new()
+	deck_panel.add_child(main_summary_label)
+	var deck_scroll := ScrollContainer.new()
+	deck_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	deck_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_panel.add_child(deck_scroll)
+	main_deck_list = VBoxContainer.new()
+	main_deck_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_scroll.add_child(main_deck_list)
+	var validate_button := Button.new()
+	validate_button.text = "メインデッキを検証"
+	validate_button.pressed.connect(_validate_main_deck)
+	deck_panel.add_child(validate_button)
+	main_validation_label = Label.new()
+	main_validation_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	deck_panel.add_child(main_validation_label)
+
+
+func _build_promotion_tab(tabs: TabContainer) -> void:
+	var page := HBoxContainer.new()
+	page.name = "成デッキ"
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(page)
+
+	var available_panel := VBoxContainer.new()
+	available_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_panel.size_flags_stretch_ratio = 1.0
+	page.add_child(available_panel)
+	var available_title := Label.new()
+	available_title.text = "追加できる成カード"
+	available_title.add_theme_font_size_override("font_size", 18)
+	available_panel.add_child(available_title)
+	var available_scroll := ScrollContainer.new()
+	available_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	available_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_panel.add_child(available_scroll)
+	promotion_available_list = VBoxContainer.new()
+	promotion_available_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	available_scroll.add_child(promotion_available_list)
+
+	var deck_panel := VBoxContainer.new()
+	deck_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_panel.size_flags_stretch_ratio = 1.0
+	page.add_child(deck_panel)
+	var deck_title := Label.new()
+	deck_title.text = "現在の成デッキ"
+	deck_title.add_theme_font_size_override("font_size", 18)
+	deck_panel.add_child(deck_title)
+	promotion_summary_label = Label.new()
+	deck_panel.add_child(promotion_summary_label)
+	var deck_scroll := ScrollContainer.new()
+	deck_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	deck_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_panel.add_child(deck_scroll)
+	promotion_deck_list = VBoxContainer.new()
+	promotion_deck_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_scroll.add_child(promotion_deck_list)
+	var validate_button := Button.new()
+	validate_button.text = "成デッキを検証"
+	validate_button.pressed.connect(_validate_promotion_deck)
+	deck_panel.add_child(validate_button)
+	promotion_validation_label = Label.new()
+	promotion_validation_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	deck_panel.add_child(promotion_validation_label)
+
+
+func _refresh_main_deck() -> void:
+	_clear_container(main_available_list)
+	_clear_container(main_deck_list)
+
+	for card_name in CardDatabase.get_card_names_for_categories(["兵", "壁", "罠"]):
+		var card: Dictionary = CardDatabase.get_card(card_name)
+		if card.is_empty():
+			continue
+		if not ["兵", "壁", "罠"].has(str(card.get("category", ""))):
+			continue
+
+		var add_button := Button.new()
+		var max_copies := int(card.get("max_copies", 2))
+		var current_copies := _count_card(main_deck, card_name)
+		var copy_text := "同名制限なし" if max_copies < 0 else "同名上限%d枚" % max_copies
+		add_button.text = "%s（召喚%d／デッキ%d・%s）を追加" % [card_name, int(card.get("cost", 0)), int(card.get("deckcost", 0)), copy_text]
+		add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		add_button.disabled = main_deck.size() >= 20 or (max_copies >= 0 and current_copies >= max_copies)
+		add_button.pressed.connect(_add_main_card.bind(card_name))
+		main_available_list.add_child(add_button)
+
+	# 表示だけ sort_order 順に並べる。main_deck 自体の保存順序は変更しない。
+	var display_indices: Array[int] = []
+	for i in range(main_deck.size()):
+		display_indices.append(i)
+	display_indices.sort_custom(func(a: int, b: int) -> bool:
+		var card_a: Dictionary = CardDatabase.get_card(main_deck[a])
+		var card_b: Dictionary = CardDatabase.get_card(main_deck[b])
+		var order_a := int(card_a.get("sort_order", 9999))
+		var order_b := int(card_b.get("sort_order", 9999))
+		if order_a == order_b:
+			if main_deck[a] == main_deck[b]:
+				return a < b
+			return main_deck[a] < main_deck[b]
+		return order_a < order_b
+	)
+	for display_position in range(display_indices.size()):
+		var source_index: int = display_indices[display_position]
+		var card_name: String = main_deck[source_index]
+		var row := HBoxContainer.new()
+		var card: Dictionary = CardDatabase.get_card(card_name)
+		var label := Label.new()
+		label.text = "%d. %s（召喚%d／デッキ%d）" % [display_position + 1, card_name, int(card.get("cost", 0)), int(card.get("deckcost", 0))]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var remove_button := Button.new()
+		remove_button.text = "削除"
+		remove_button.pressed.connect(_remove_main_card.bind(source_index))
+		row.add_child(remove_button)
+		main_deck_list.add_child(row)
+
+	var total_cost := _get_total_cost(main_deck)
+	main_summary_label.text = "枚数：%d / 20　合計コスト：%d / 20" % [main_deck.size(), total_cost]
+	main_validation_label.text = ""
+
+
+func _refresh_promotion_deck() -> void:
+	_clear_container(promotion_available_list)
+	_clear_container(promotion_deck_list)
+
+	for card_name in CardDatabase.get_card_names_for_categories(["成"]):
+		var card: Dictionary = CardDatabase.get_card(card_name)
+		if card.is_empty() or str(card.get("category", "")) != "成":
+			continue
+
+		var add_button := Button.new()
+		var max_copies := int(card.get("max_copies", 2))
+		var current_copies := _count_card(promotion_deck, card_name)
+		var copy_text := "同名制限なし" if max_copies < 0 else "同名上限%d枚" % max_copies
+		add_button.text = "%s（%s）を追加" % [card_name, copy_text]
+		add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		add_button.disabled = promotion_deck.size() >= 5 or (max_copies >= 0 and current_copies >= max_copies)
+		add_button.pressed.connect(_add_promotion_card.bind(card_name))
+		promotion_available_list.add_child(add_button)
+
+	# 成デッキも表示だけ sort_order 順に並べ、元配列の順序は維持する。
+	var display_indices: Array[int] = []
+	for i in range(promotion_deck.size()):
+		display_indices.append(i)
+	display_indices.sort_custom(func(a: int, b: int) -> bool:
+		var card_a: Dictionary = CardDatabase.get_card(promotion_deck[a])
+		var card_b: Dictionary = CardDatabase.get_card(promotion_deck[b])
+		var order_a := int(card_a.get("sort_order", 9999))
+		var order_b := int(card_b.get("sort_order", 9999))
+		if order_a == order_b:
+			if promotion_deck[a] == promotion_deck[b]:
+				return a < b
+			return promotion_deck[a] < promotion_deck[b]
+		return order_a < order_b
+	)
+	for display_position in range(display_indices.size()):
+		var source_index: int = display_indices[display_position]
+		var card_name: String = promotion_deck[source_index]
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%d. %s" % [display_position + 1, card_name]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var remove_button := Button.new()
+		remove_button.text = "削除"
+		remove_button.pressed.connect(_remove_promotion_card.bind(source_index))
+		row.add_child(remove_button)
+		promotion_deck_list.add_child(row)
+
+	promotion_summary_label.text = "枚数：%d / 5" % promotion_deck.size()
+	promotion_validation_label.text = ""
+
+
+func _add_main_card(card_name: String) -> void:
+	if main_deck.size() >= 20:
+		main_validation_label.text = "メインデッキは20枚までです。"
+		return
+	main_deck.append(card_name)
+	_refresh_main_deck()
+
+
+func _remove_main_card(index: int) -> void:
+	if index >= 0 and index < main_deck.size():
+		main_deck.remove_at(index)
+	_refresh_main_deck()
+
+
+func _add_promotion_card(card_name: String) -> void:
+	if promotion_deck.size() >= 5:
+		promotion_validation_label.text = "成デッキは5枚までです。"
+		return
+	promotion_deck.append(card_name)
+	_refresh_promotion_deck()
+
+
+func _remove_promotion_card(index: int) -> void:
+	if index >= 0 and index < promotion_deck.size():
+		promotion_deck.remove_at(index)
+	_refresh_promotion_deck()
+
+
+func _validate_main_deck() -> void:
+	var result: Dictionary = DeckRules.validate_main_deck(main_deck)
+	if bool(result.get("valid", false)):
+		main_validation_label.text = "構築条件を満たしています。"
+	else:
+		var error_lines := PackedStringArray()
+		for error_message in result.get("errors", []):
+			error_lines.append(str(error_message))
+		main_validation_label.text = "\n".join(error_lines)
+
+
+func _validate_promotion_deck() -> void:
+	var result: Dictionary = DeckRules.validate_promotion_deck(promotion_deck)
+	if bool(result.get("valid", false)):
+		promotion_validation_label.text = "構築条件を満たしています。"
+	else:
+		var error_lines := PackedStringArray()
+		for error_message in result.get("errors", []):
+			error_lines.append(str(error_message))
+		promotion_validation_label.text = "\n".join(error_lines)
+
+
+func _get_total_cost(card_names: Array[String]) -> int:
+	var total := 0
+	for card_name in card_names:
+		var card: Dictionary = CardDatabase.get_card(card_name)
+		total += int(card.get("deckcost", 0))
+	return total
+
+
+func _count_card(card_names: Array[String], target_name: String) -> int:
+	var count := 0
+	for card_name in card_names:
+		if card_name == target_name:
+			count += 1
+	return count
+
+
+func _clear_container(container: Node) -> void:
+	# ボタンの pressed シグナル処理中に呼ばれることがあるため、
+	# free() で即座に破棄せず、フレーム終了時に解放する。
+	for child in container.get_children():
+		child.queue_free()
+
+
+# 2つの編集対象を、将来の複数デッキ保存にも拡張しやすい profiles 形式で保持する。
+func _make_empty_profiles() -> Dictionary:
+	return {
+		PROFILE_MAIN: {"main_deck": [], "promotion_deck": []},
+		PROFILE_SUB: {"main_deck": [], "promotion_deck": []}
+	}
+
+
+func _store_editing_profile() -> void:
+	profiles[active_profile_id] = {
+		"main_deck": main_deck.duplicate(),
+		"promotion_deck": promotion_deck.duplicate()
+	}
+
+
+func _load_profile_into_editor() -> void:
+	var profile: Dictionary = profiles.get(active_profile_id, {"main_deck": [], "promotion_deck": []})
+	main_deck.clear()
+	for raw_name in profile.get("main_deck", []):
+		main_deck.append(str(raw_name))
+	promotion_deck.clear()
+	for raw_name in profile.get("promotion_deck", []):
+		promotion_deck.append(str(raw_name))
+
+
+func _on_profile_selected(index: int) -> void:
+	if index < 0 or index > 1:
+		return
+	_store_editing_profile()
+	active_profile_id = PROFILE_MAIN if index == 0 else PROFILE_SUB
+	_load_profile_into_editor()
+	_refresh_main_deck()
+	_refresh_promotion_deck()
+	var profile_label := "メイン用（先手）" if active_profile_id == PROFILE_MAIN else "サブ用（後手）"
+	save_status_label.text = "%sを編集中です。切り替え前の変更は保持されています。" % profile_label
+
+
+# メイン用・サブ用の両方を user://deck_save.json に保存する。
+# 未完成のデッキも下書きとして保存できる。
+func _save_decks() -> void:
+	_store_editing_profile()
+	var save_data := {
+		"format_version": SAVE_FORMAT_VERSION,
+		"last_selected_profile": active_profile_id,
+		"profiles": profiles
+	}
+
+	var file := FileAccess.open(DECK_SAVE_PATH, FileAccess.WRITE)
+	if file == null:
+		save_status_label.text = "保存に失敗しました（エラーコード：%d）。" % FileAccess.get_open_error()
+		return
+
+	file.store_string(JSON.stringify(save_data, "\t"))
+	file.close()
+	save_status_label.text = "メイン用・サブ用の両方を保存しました。\n保存先：%s" % DECK_SAVE_PATH
+
+
+# v2の2プロフィール形式と、旧v1の単一デッキ形式を読み込む。
+# 旧形式はメイン用・サブ用の両方に複製してから編集可能にする。
+func _load_decks() -> void:
+	if not FileAccess.file_exists(DECK_SAVE_PATH):
+		save_status_label.text = "保存データがありません。先にデッキを作成してください。"
+		return
+
+	var file := FileAccess.open(DECK_SAVE_PATH, FileAccess.READ)
+	if file == null:
+		save_status_label.text = "保存データを開けませんでした（エラーコード：%d）。" % FileAccess.get_open_error()
+		return
+
+	var json_text := file.get_as_text()
+	file.close()
+	var parsed: Variant = JSON.parse_string(json_text)
+	if not (parsed is Dictionary):
+		save_status_label.text = "保存データを読み取れません。JSON形式を確認してください。"
+		return
+
+	var save_data: Dictionary = parsed
+	var version := int(save_data.get("format_version", -1))
+
+	if version == 1:
+		var legacy_main: Dictionary = _validate_profile_data(save_data, "旧形式のデッキ")
+		if not bool(legacy_main.get("valid", false)):
+			save_status_label.text = "旧形式のデッキを読み込めません：%s" % str(legacy_main.get("error", "不明なエラー"))
+			return
+		var migrated_profile := {
+			"main_deck": legacy_main["main_deck"].duplicate(),
+			"promotion_deck": legacy_main["promotion_deck"].duplicate()
+		}
+		profiles = {
+			PROFILE_MAIN: migrated_profile.duplicate(true),
+			PROFILE_SUB: migrated_profile.duplicate(true)
+		}
+		active_profile_id = PROFILE_MAIN
+		profile_selector.select(0)
+		_load_profile_into_editor()
+		_refresh_main_deck()
+		_refresh_promotion_deck()
+		save_status_label.text = "旧形式のデッキを読み込み、メイン用・サブ用の両方に複製しました。サブ用を編集してから両方を保存してください。"
+		return
+
+	if version != SAVE_FORMAT_VERSION:
+		save_status_label.text = "保存データの形式が現在のバージョンと異なります。"
+		return
+
+	var raw_profiles: Variant = save_data.get("profiles", null)
+	if not (raw_profiles is Dictionary):
+		save_status_label.text = "保存データに profiles がありません。"
+		return
+
+	var loaded_profiles := _make_empty_profiles()
+	for profile_id in [PROFILE_MAIN, PROFILE_SUB]:
+		var raw_profile: Variant = raw_profiles.get(profile_id, null)
+		# 初回作成などでプロフィールが未保存なら空の下書きとして扱う。
+		if raw_profile == null:
+			continue
+		var validated: Dictionary = _validate_profile_data(raw_profile, "メイン用" if profile_id == PROFILE_MAIN else "サブ用")
+		if not bool(validated.get("valid", false)):
+			save_status_label.text = "%sデッキを読み込めません：%s" % ["メイン用" if profile_id == PROFILE_MAIN else "サブ用", str(validated.get("error", "不明なエラー"))]
+			return
+		loaded_profiles[profile_id] = {
+			"main_deck": validated["main_deck"],
+			"promotion_deck": validated["promotion_deck"]
+		}
+
+	profiles = loaded_profiles
+	active_profile_id = str(save_data.get("last_selected_profile", PROFILE_MAIN))
+	if active_profile_id != PROFILE_SUB:
+		active_profile_id = PROFILE_MAIN
+	profile_selector.select(0 if active_profile_id == PROFILE_MAIN else 1)
+	_load_profile_into_editor()
+	_refresh_main_deck()
+	_refresh_promotion_deck()
+	save_status_label.text = "メイン用・サブ用の両方を読み込みました。編集対象を切り替えて内容を確認できます。"
+
+
+# 下書き保存向けの読み込み検証。枚数未満・コスト未達は許可するが、上限超過や不正カードは拒否する。
+func _validate_profile_data(raw_profile: Variant, profile_label: String) -> Dictionary:
+	if not (raw_profile is Dictionary):
+		return {"valid": false, "error": "%sのデータが辞書形式ではありません。" % profile_label}
+
+	var main_result: Dictionary = _validate_saved_deck(
+		raw_profile.get("main_deck", null), ["兵", "壁", "罠"], 20, "%sメインデッキ" % profile_label
+	)
+	if not bool(main_result.get("valid", false)):
+		return {"valid": false, "error": str(main_result.get("error", "メインデッキの検証に失敗しました。"))}
+
+	var promotion_result: Dictionary = _validate_saved_deck(
+		raw_profile.get("promotion_deck", null), ["成"], 5, "%s成デッキ" % profile_label
+	)
+	if not bool(promotion_result.get("valid", false)):
+		return {"valid": false, "error": str(promotion_result.get("error", "成デッキの検証に失敗しました。"))}
+
+	return {
+		"valid": true,
+		"main_deck": main_result["cards"],
+		"promotion_deck": promotion_result["cards"]
+	}
+
+
+func _validate_saved_deck(
+	raw_deck: Variant,
+	allowed_categories: Array,
+	max_cards: int,
+	deck_label: String
+) -> Dictionary:
+	if not (raw_deck is Array):
+		return {"valid": false, "error": "%sのデータが配列ではありません。" % deck_label}
+	if raw_deck.size() > max_cards:
+		return {"valid": false, "error": "%sが上限の%d枚を超えています。" % [deck_label, max_cards]}
+
+	var loaded_cards: Array[String] = []
+	var counts: Dictionary = {}
+	for raw_card_name in raw_deck:
+		if typeof(raw_card_name) != TYPE_STRING:
+			return {"valid": false, "error": "カード名のデータ形式が正しくありません。"}
+		var card_name := str(raw_card_name)
+		var card: Dictionary = CardDatabase.get_card(card_name)
+		if card.is_empty():
+			return {"valid": false, "error": "カードデータが見つかりません：%s" % card_name}
+		var category := str(card.get("category", ""))
+		if not allowed_categories.has(category):
+			return {"valid": false, "error": "%sに入れられないカードです：%s" % [deck_label, card_name]}
+		counts[card_name] = int(counts.get(card_name, 0)) + 1
+		var max_copies := int(card.get("max_copies", 2))
+		if max_copies >= 0 and int(counts[card_name]) > max_copies:
+			return {"valid": false, "error": "%sの同名上限を超えています：%s" % [deck_label, card_name]}
+		loaded_cards.append(card_name)
+	return {"valid": true, "cards": loaded_cards, "error": ""}

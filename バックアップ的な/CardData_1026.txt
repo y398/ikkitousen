@@ -1,0 +1,18 @@
+extends Resource
+class_name CardData
+
+# カードの基本情報
+@export var card_name: String = ""
+@export var category: String = ""
+@export var cost: int = 0
+
+# 移動ルール
+@export var movement_type: String = ""
+@export var can_move_forward: bool = true
+@export var can_move_backward: bool = false
+@export var is_sliding: bool = false
+
+# 壁の情報
+@export var wall_length: int = 1
+@export var destroy_cost: int = 0
+@export var blocks_knight: bool = false

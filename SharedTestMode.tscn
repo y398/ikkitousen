@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://4f66pt7dc5s"]
+
+[ext_resource type="Script" uid="uid://de6uy63clji00" path="res://SharedTestMain.gd" id="1_main"]
+
+[node name="SharedTestMode" type="Node2D" unique_id=83302949]
+script = ExtResource("1_main")

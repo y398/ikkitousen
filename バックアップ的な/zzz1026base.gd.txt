@@ -1,0 +1,276 @@
+extends RefCounted
+
+const CardDataResource = preload("res://CardData.gd")
+
+# カードの基本情報とデッキ構築ルールを一元管理する。
+# max_copies: -1 は同名カードの枚数制限なしを表す。
+const CARD_DATA: Dictionary = {
+	"歩": {
+		"category": "兵",
+		"sort_order": 10,
+		"cost": 1,
+		"deckcost": 0,
+		"max_copies": -1,
+		"movement_type": "pawn",
+		"can_move_forward": true,
+		"can_move_backward": false,
+		"is_sliding": false,
+		"promotion_card": "と金"
+	},
+	"香": {
+		"category": "兵",
+		"sort_order": 20,
+		"cost": 2,
+		"deckcost": 2,
+		"max_copies": 1,
+		"movement_type": "lance",
+		"can_move_forward": true,
+		"can_move_backward": false,
+		"is_sliding": true,
+		"promotion_card": "成香"
+	},
+	"桂": {
+		"category": "兵",
+		"sort_order": 30,
+		"cost": 2,
+		"deckcost": 1,
+		"max_copies": 2,
+		"movement_type": "knight",
+		"can_move_forward": true,
+		"can_move_backward": false,
+		"is_sliding": false,
+		"promotion_card": "成桂"
+	},
+	"銀": {
+		"category": "兵",
+		"sort_order": 40,
+		"cost": 3,
+		"deckcost": 2,
+		"max_copies": 2,
+		"movement_type": "silver",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": false
+	},
+	"金": {
+		"category": "兵",
+		"sort_order": 50,
+		"cost": 3,
+		"deckcost": 2,
+		"max_copies": 2,
+		"movement_type": "gold",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": false
+	},
+	"角": {
+		"category": "兵",
+		"sort_order": 60,
+		"cost": 4,
+		"deckcost": 3,
+		"max_copies": 2,
+		"movement_type": "bishop",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": true,
+		"promotion_card": "馬"
+	},
+	"飛": {
+		"category": "兵",
+		"sort_order": 70,
+		"cost": 4,
+		"deckcost": 3,
+		"max_copies": 2,
+		"movement_type": "rook",
+		"can_move_forward": true,
+		"can_move_backward": true,
+		"is_sliding": true,
+		"promotion_card": "龍"
+	},
+
+	# 壁：竹束
+	"竹束": {
+		"category": "壁",
+		"sort_order": 110,
+		"cost": 1,
+		"deckcost": 1,
+		"max_copies": 2,
+		"movement_type": "none",
+		"can_move_forward": false,
+		"can_move_backward": false,
+		"is_sliding": false,
+		"wall_length": 1,
+		"destroy_cost": 1,
+		"blocks_knight": false
+	},
+	# 壁：馬防柵
+	"馬防柵": {
+		"category": "壁",
+		"sort_order": 120,
+		"cost": 3,
+		"deckcost": 2,
+		"max_copies": 2,
+		"movement_type": "none",
+		"can_move_forward": false,
+		"can_move_backward": false,
+		"is_sliding": false,
+		"wall_length": 2,
+		"destroy_cost": 3,
+		"blocks_knight": true
+	},
+	"罠": {
+		"category": "罠",
+		"sort_order": 130,
+		"cost": 2,
+		"deckcost": 1,
+		"max_copies": 2,
+		"movement_type": "none",
+		"can_move_forward": false,
+		"can_move_backward": false,
+		"is_sliding": false,
+		"trap_effect": "destroy_soldier"
+	},
+	"特殊": {
+		"category": "特殊",
+		"sort_order": 140,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "none",
+		"can_move_forward": false,
+		"can_move_backward": false,
+		"is_sliding": false
+	},
+
+	# 成カード
+	"と金": {
+		"category": "成",
+		"sort_order": 210,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "gold",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "歩"
+	},
+	"成香": {
+		"category": "成",
+		"sort_order": 220,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "gold",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "香"
+	},
+	"成桂": {
+		"category": "成",
+		"sort_order": 230,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "gold",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "桂"
+	},
+	"成銀": {
+		"category": "成",
+		"sort_order": 240,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "gold",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "銀"
+	},
+	"馬": {
+		"category": "成",
+		"sort_order": 250,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "horse",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "角"
+	},
+	"龍": {
+		"category": "成",
+		"sort_order": 260,
+		"cost": 0,
+		"deckcost": 0,
+		"max_copies": 2,
+		"movement_type": "dragon",
+		"wall_length": 1,
+		"destroy_cost": 0,
+		"blocks_knight": false,
+		"promotes_from": "飛"
+	}
+}
+
+
+# 指定したカード名の情報を返す。
+static func get_card(card_name: String) -> Dictionary:
+	if not CARD_DATA.has(card_name):
+		return {}
+
+	var definition: Dictionary = CARD_DATA[card_name]
+	var card_data = CardDataResource.new()
+	card_data.card_name = card_name
+	card_data.category = str(definition.get("category", ""))
+	card_data.cost = int(definition.get("cost", 0))
+	card_data.movement_type = str(definition.get("movement_type", "none"))
+	card_data.can_move_forward = bool(definition.get("can_move_forward", true))
+	card_data.can_move_backward = bool(definition.get("can_move_backward", true))
+	card_data.is_sliding = bool(definition.get("is_sliding", false))
+	card_data.wall_length = int(definition.get("wall_length", 1))
+	card_data.destroy_cost = int(definition.get("destroy_cost", 0))
+	card_data.blocks_knight = bool(definition.get("blocks_knight", false))
+
+	return {
+		"name": card_data.card_name,
+		"category": card_data.category,
+		"sort_order": int(definition.get("sort_order", 9999)),
+		"cost": card_data.cost,
+		"deckcost": int(definition.get("deckcost", 0)),
+		"max_copies": int(definition.get("max_copies", 2)),
+		"movement_type": card_data.movement_type,
+		"can_move_forward": card_data.can_move_forward,
+		"can_move_backward": card_data.can_move_backward,
+		"is_sliding": card_data.is_sliding,
+		"wall_length": card_data.wall_length,
+		"destroy_cost": card_data.destroy_cost,
+		"blocks_knight": card_data.blocks_knight,
+		"trap_effect": str(definition.get("trap_effect", "")),
+		"promotion_card": str(definition.get("promotion_card", "")),
+		"promotes_from": str(definition.get("promotes_from", ""))
+	}
+
+
+# 指定したカード種別のカード名を sort_order の昇順で返す。
+# 同じ sort_order のカードは名前順に並ぶ。
+static func get_card_names_for_categories(categories: Array) -> Array[String]:
+	var result: Array[String] = []
+	for raw_name in CARD_DATA.keys():
+		var card_name := str(raw_name)
+		var definition: Dictionary = CARD_DATA[card_name]
+		if categories.has(str(definition.get("category", ""))):
+			result.append(card_name)
+
+	result.sort_custom(func(a: String, b: String) -> bool:
+		var a_order := int(CARD_DATA[a].get("sort_order", 9999))
+		var b_order := int(CARD_DATA[b].get("sort_order", 9999))
+		if a_order == b_order:
+			return a < b
+		return a_order < b_order
+	)
+	return result
