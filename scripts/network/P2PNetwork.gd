@@ -80,6 +80,9 @@ func start_host() -> bool:
 		return false
 
 	data_channel = peer.create_data_channel("game_channel", {"ordered": true})
+	if data_channel == null:
+		connection_error.emit("DataChannelの作成に失敗した（デスクトップ実行にはwebrtc GDExtensionが必要である）")
+		return false
 	data_channel.write_mode = WebRTCDataChannel.WRITE_MODE_TEXT
 
 	var error: Error = peer.create_offer()
@@ -121,6 +124,8 @@ func _setup_peer() -> bool:
 
 
 func _on_data_channel_received(channel: WebRTCDataChannel) -> void:
+	if channel == null:
+		return
 	data_channel = channel
 	data_channel.write_mode = WebRTCDataChannel.WRITE_MODE_TEXT
 	log_updated.emit("データ通信チャンネルを受信した")
