@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/p2p-room-match
-      - fix/p2p-room-match-issues
   workflow_dispatch:
 
 permissions:
