@@ -22,6 +22,7 @@ P2PNetwork="*res://scripts/network/P2PNetwork.gd"
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/dpi/allow_hidpi=true
 
 [gui]
 

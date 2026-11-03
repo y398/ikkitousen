@@ -111,7 +111,7 @@ func _build_ui() -> void:
 	back_btn.offset_bottom = 58.0
 	back_btn.custom_minimum_size = Vector2(150, 42)
 	back_btn.z_index = 10
-	back_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_style_button(back_btn, false)
 	back_btn.pressed.connect(_on_back_to_title_pressed)
 	add_child(back_btn)
 
@@ -143,6 +143,7 @@ func _build_ui() -> void:
 	var deck_label := Label.new()
 	deck_label.text = "1. 使用する自分のデッキを選択"
 	deck_label.add_theme_font_size_override("font_size", 16)
+	deck_label.add_theme_color_override("font_color", ACCENT_COLOR)
 	deck_vbox.add_child(deck_label)
 
 	deck_selector = OptionButton.new()
@@ -163,6 +164,7 @@ func _build_ui() -> void:
 	host_button.text = "部屋を作る (ホスト・先手)"
 	host_button.custom_minimum_size = Vector2(0, 48)
 	host_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_button(host_button, false)
 	host_button.pressed.connect(_on_start_host_pressed)
 	role_box.add_child(host_button)
 
@@ -170,6 +172,7 @@ func _build_ui() -> void:
 	guest_button.text = "部屋に入る (ゲスト・後手)"
 	guest_button.custom_minimum_size = Vector2(0, 48)
 	guest_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_button(guest_button, false)
 	guest_button.pressed.connect(_on_start_guest_pressed)
 	role_box.add_child(guest_button)
 
@@ -181,6 +184,7 @@ func _build_ui() -> void:
 
 	var host_step1_lbl := Label.new()
 	host_step1_lbl.text = "Step 1: あなたの接続コード（オファー）をコピーして相手に送信する"
+	host_step1_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	host_container.add_child(host_step1_lbl)
 
 	host_offer_edit = TextEdit.new()
@@ -191,20 +195,21 @@ func _build_ui() -> void:
 
 	host_copy_button = Button.new()
 	host_copy_button.text = "接続コードをクリップボードにコピー"
-	host_copy_button.custom_minimum_size.y = 40
-	host_copy_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	host_copy_button.custom_minimum_size.y = 42
+	_style_button(host_copy_button, false)
 	host_copy_button.pressed.connect(func(): _copy_to_clipboard(host_offer_edit.text, "オファーコード"))
 	host_container.add_child(host_copy_button)
 
 	var host_step2_lbl := Label.new()
 	host_step2_lbl.text = "Step 2: 相手から返信されたアンサーコードをここに貼り付けて接続する"
+	host_step2_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	host_container.add_child(host_step2_lbl)
 
 	# 貼り付けボタン（タッチ操作・ブラウザ連携）
 	var host_paste_button := Button.new()
-	host_paste_button.text = "📋 クリップボードから貼り付け"
-	host_paste_button.custom_minimum_size.y = 40
-	host_paste_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	host_paste_button.text = "[貼付] クリップボードから貼り付け"
+	host_paste_button.custom_minimum_size.y = 42
+	_style_button(host_paste_button, true)
 	host_paste_button.pressed.connect(func(): _paste_to_target(host_answer_edit))
 	host_container.add_child(host_paste_button)
 
@@ -215,8 +220,8 @@ func _build_ui() -> void:
 
 	host_connect_button = Button.new()
 	host_connect_button.text = "アンサーを適用して対局を開始する"
-	host_connect_button.custom_minimum_size.y = 44
-	host_connect_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	host_connect_button.custom_minimum_size.y = 46
+	_style_button(host_connect_button, true)
 	host_connect_button.pressed.connect(_on_host_apply_answer_pressed)
 	host_container.add_child(host_connect_button)
 
@@ -228,13 +233,14 @@ func _build_ui() -> void:
 
 	var guest_step1_lbl := Label.new()
 	guest_step1_lbl.text = "Step 1: ホストから受け取ったオファーコードを貼り付ける"
+	guest_step1_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	guest_container.add_child(guest_step1_lbl)
 
 	# 貼り付けボタン（タッチ操作・ブラウザ連携）
 	var guest_paste_button := Button.new()
-	guest_paste_button.text = "📋 クリップボードから貼り付け"
-	guest_paste_button.custom_minimum_size.y = 40
-	guest_paste_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	guest_paste_button.text = "[貼付] クリップボードから貼り付け"
+	guest_paste_button.custom_minimum_size.y = 42
+	_style_button(guest_paste_button, true)
 	guest_paste_button.pressed.connect(func(): _paste_to_target(guest_offer_edit))
 	guest_container.add_child(guest_paste_button)
 
@@ -245,13 +251,14 @@ func _build_ui() -> void:
 
 	guest_generate_button = Button.new()
 	guest_generate_button.text = "オファーを読み込み、返信コード（アンサー）を生成する"
-	guest_generate_button.custom_minimum_size.y = 44
-	guest_generate_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	guest_generate_button.custom_minimum_size.y = 46
+	_style_button(guest_generate_button, true)
 	guest_generate_button.pressed.connect(_on_guest_apply_offer_pressed)
 	guest_container.add_child(guest_generate_button)
 
 	var guest_step2_lbl := Label.new()
 	guest_step2_lbl.text = "Step 2: 生成されたアンサーコードをコピーしてホストに返信する"
+	guest_step2_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	guest_container.add_child(guest_step2_lbl)
 
 	guest_answer_edit = TextEdit.new()
@@ -262,8 +269,8 @@ func _build_ui() -> void:
 
 	guest_copy_button = Button.new()
 	guest_copy_button.text = "アンサーコードをクリップボードにコピー"
-	guest_copy_button.custom_minimum_size.y = 40
-	guest_copy_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	guest_copy_button.custom_minimum_size.y = 42
+	_style_button(guest_copy_button, false)
 	guest_copy_button.pressed.connect(func(): _copy_to_clipboard(guest_answer_edit.text, "アンサーコード"))
 	guest_container.add_child(guest_copy_button)
 
@@ -441,4 +448,51 @@ func _paste_to_target(target_edit: TextEdit) -> void:
 		_on_log_updated("クリップボードから貼り付けた")
 	else:
 		_on_log_updated("クリップボードが空、またはアクセス許可が得られなかった")
+
+
+# ボタンに統一された高コントラストなスタイルを適用する
+func _style_button(btn: Button, is_accent: bool = false) -> void:
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn.add_theme_font_size_override("font_size", 14)
+
+	var normal_bg := Color(0.18, 0.24, 0.35) if is_accent else Color(0.10, 0.13, 0.19)
+	var border_color := ACCENT_COLOR if is_accent else Color(0.28, 0.35, 0.46)
+	var text_color := Color(1.0, 1.0, 1.0) if is_accent else TEXT_COLOR
+
+	var normal_style := StyleBoxFlat.new()
+	normal_style.bg_color = normal_bg
+	normal_style.border_color = border_color
+	normal_style.set_border_width_all(1)
+	normal_style.set_corner_radius_all(6)
+	normal_style.set_content_margin_all(8)
+	btn.add_theme_stylebox_override("normal", normal_style)
+	btn.add_theme_color_override("font_color", text_color)
+
+	var hover_style := StyleBoxFlat.new()
+	hover_style.bg_color = normal_bg.lightened(0.12)
+	hover_style.border_color = ACCENT_COLOR
+	hover_style.set_border_width_all(2)
+	hover_style.set_corner_radius_all(6)
+	hover_style.set_content_margin_all(8)
+	btn.add_theme_stylebox_override("hover", hover_style)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+
+	var pressed_style := StyleBoxFlat.new()
+	pressed_style.bg_color = normal_bg.darkened(0.1)
+	pressed_style.border_color = ACCENT_COLOR
+	pressed_style.set_border_width_all(2)
+	pressed_style.set_corner_radius_all(6)
+	pressed_style.set_content_margin_all(8)
+	btn.add_theme_stylebox_override("pressed", pressed_style)
+	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
+
+	var disabled_style := StyleBoxFlat.new()
+	disabled_style.bg_color = Color(0.08, 0.09, 0.12, 0.8)
+	disabled_style.border_color = Color(0.2, 0.22, 0.28)
+	disabled_style.set_border_width_all(1)
+	disabled_style.set_corner_radius_all(6)
+	disabled_style.set_content_margin_all(8)
+	btn.add_theme_stylebox_override("disabled", disabled_style)
+	btn.add_theme_color_override("font_disabled_color", Color(0.55, 0.60, 0.68))
+
 
