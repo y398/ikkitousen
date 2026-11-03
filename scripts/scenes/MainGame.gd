@@ -326,6 +326,7 @@ func _initialize_p2p_match() -> void:
 	# ホストとゲストで共通の乱数シードを用いて山札の同一性を保証する
 	if P2PNetwork.shared_random_seed != 0:
 		seed(P2PNetwork.shared_random_seed)
+		print("P2P乱数シードを適用した: %d" % P2PNetwork.shared_random_seed)
 
 	_initialize_match_from_profiles(startup_players)
 	print("P2Pルームマッチを開始した　あなたの陣営: %s" % ("先手(ホスト)" if P2PNetwork.local_player_id == 0 else "後手(ゲスト)"))
@@ -347,13 +348,31 @@ func _on_p2p_message_received(msg: Dictionary) -> void:
 	match action:
 		"summon":
 			var hand_idx: int = int(msg.get("hand_index", -1))
+			var remote_card_name: String = str(msg.get("card_name", ""))
 			var sq_arr: Array = msg.get("square", [])
 			var pending_arr: Array = msg.get("pending_wall_square", [])
 			if sq_arr.size() == 2:
 				var sq := Vector2i(int(sq_arr[0]), int(sq_arr[1]))
 				if pending_arr.size() == 2:
 					pending_wall_square = Vector2i(int(pending_arr[0]), int(pending_arr[1]))
+				
+				# 召喚カードを手札から特定する（カード名優先で照合）
 				selected_hand_index = hand_idx
+				var current_hand: Array = hands[current_player]
+				if not remote_card_name.is_empty():
+					var matched_idx: int = -1
+					if hand_idx >= 0 and hand_idx < current_hand.size() and str(current_hand[hand_idx].get("name", "")) == remote_card_name:
+						matched_idx = hand_idx
+					else:
+						# インデックスがズレていた場合は手札内の同名カードを探す
+						for i in range(current_hand.size()):
+							if str(current_hand[i].get("name", "")) == remote_card_name:
+								matched_idx = i
+								break
+					if matched_idx != -1:
+						selected_hand_index = matched_idx
+					elif not current_hand.is_empty():
+						selected_hand_index = clampi(hand_idx, 0, current_hand.size() - 1)
 				summon_piece(sq)
 		"move":
 			var from_arr: Array = msg.get("from", [])
@@ -545,6 +564,10 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 			"name": "飛",
 			"owner": 0
 		}
+	# P2P対局時は山札シャッフルの直前に乱数シードを確実に適用する
+	if P2PNetwork.is_p2p_match and P2PNetwork.shared_random_seed != 0:
+		seed(P2PNetwork.shared_random_seed)
+
 	# 選択された各デッキから山札を作成する。
 	for player in range(2):
 		var player_profile: Dictionary = startup_players[player]
@@ -2142,6 +2165,7 @@ func summon_piece(square: Vector2i) -> void:
 		var send_data: Dictionary = {
 			"action": "summon",
 			"hand_index": selected_hand_index,
+			"card_name": card_name,
 			"square": [square.x, square.y]
 		}
 		if pending_wall_square.x != -1:

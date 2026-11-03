@@ -342,12 +342,20 @@ func _on_connection_established() -> void:
 	is_local_ready = false
 
 	# 接続確立後、お互いのデッキプロファイルを交換する
-	var seed_val := randi() if P2PNetwork.current_role == P2PNetwork.Role.HOST else 0
+	# ホスト側が対局共通の乱数シードを一度だけ生成して保持する
+	if P2PNetwork.current_role == P2PNetwork.Role.HOST:
+		var generated_seed := randi()
+		if generated_seed == 0:
+			generated_seed = 1
+		P2PNetwork.shared_random_seed = generated_seed
+	else:
+		P2PNetwork.shared_random_seed = 0
+
 	var payload := {
 		"action": "deck_handshake",
 		"sender_role": "host" if P2PNetwork.current_role == P2PNetwork.Role.HOST else "guest",
 		"deck_profile": my_profile,
-		"seed": seed_val
+		"seed": P2PNetwork.shared_random_seed
 	}
 	P2PNetwork.send_message(payload)
 
@@ -371,13 +379,13 @@ func _handle_deck_handshake(msg: Dictionary) -> void:
 
 	var sender_role := str(msg.get("sender_role", ""))
 	if sender_role == "host":
-		# ゲスト側はホストの乱数シードを採用する
+		# ゲスト側はホストから届いた乱数シードを採用する
 		P2PNetwork.shared_random_seed = int(msg.get("seed", 0))
 		P2PNetwork.host_deck_profile = opponent_profile
 		P2PNetwork.guest_deck_profile = my_profile
 		P2PNetwork.local_player_id = 1
 	else:
-		P2PNetwork.shared_random_seed = randi()
+		# ホスト側は自身が生成済みの乱数シードを維持する
 		P2PNetwork.host_deck_profile = my_profile
 		P2PNetwork.guest_deck_profile = opponent_profile
 		P2PNetwork.local_player_id = 0
