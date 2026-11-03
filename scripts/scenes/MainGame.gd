@@ -67,6 +67,7 @@ var _p2p_opponent_scene_ready: bool = false
 var p2p_overlay_layer: CanvasLayer
 var p2p_overlay_label: Label
 var disconnect_dialog_layer: CanvasLayer
+var game_over_dialog_layer: CanvasLayer
 
 # 対局開始前に、先手・後手が使用する保存デッキを選ぶ
 var deck_library: Dictionary = {}
@@ -386,6 +387,10 @@ func _on_p2p_message_received(msg: Dictionary) -> void:
 			_p2p_opponent_scene_ready = true
 			if _p2p_scene_ready_sent:
 				_finish_scene_ready()
+		"return_to_room":
+			print("相手が対戦準備ルームへ戻った")
+			P2PNetwork.is_p2p_match = false
+			get_tree().change_scene_to_file("res://scenes/P2PRoomLobby.tscn")
 		"summon":
 			var hand_idx: int = int(msg.get("hand_index", -1))
 			var remote_card_name: String = str(msg.get("card_name", ""))
@@ -882,6 +887,42 @@ func _create_title_return_button() -> void:
 	ui_layer.add_child(button)
 	button.pressed.connect(_return_to_title)
 
+	# P2P対局時は「ルームへ戻る（再戦）」ボタンを下に配置する
+	if P2PNetwork.is_p2p_match:
+		var room_btn := Button.new()
+		room_btn.text = "ルームへ戻る (再戦)"
+		room_btn.tooltip_text = "対戦準備ルームに戻ってデッキ変更や再戦を行う"
+		room_btn.custom_minimum_size = Vector2(160, 44)
+		room_btn.focus_mode = Control.FOCUS_NONE
+		room_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		room_btn.add_theme_font_size_override("font_size", 14)
+		room_btn.anchor_left = 0.0
+		room_btn.anchor_right = 0.0
+		room_btn.anchor_top = 0.0
+		room_btn.anchor_bottom = 0.0
+		room_btn.offset_left = 16.0
+		room_btn.offset_right = 176.0
+		room_btn.offset_top = 62.0
+		room_btn.offset_bottom = 106.0
+
+		var r_style := StyleBoxFlat.new()
+		r_style.bg_color = Color(0.18, 0.24, 0.35)
+		r_style.border_color = Color(0.84, 0.65, 0.30)
+		r_style.set_border_width_all(1)
+		r_style.set_corner_radius_all(6)
+		room_btn.add_theme_stylebox_override("normal", r_style)
+
+		var r_hover := StyleBoxFlat.new()
+		r_hover.bg_color = Color(0.24, 0.32, 0.46)
+		r_hover.border_color = Color(1.0, 0.82, 0.45)
+		r_hover.set_border_width_all(2)
+		r_hover.set_corner_radius_all(6)
+		room_btn.add_theme_stylebox_override("hover", r_hover)
+
+		room_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+		room_btn.pressed.connect(_return_to_room)
+		ui_layer.add_child(room_btn)
+
 
 # タッチ・マウス操作用のボタングループを生成する
 func _create_action_ui_buttons() -> void:
@@ -1109,6 +1150,9 @@ func _update_action_ui() -> void:
 
 
 func _return_to_title() -> void:
+	if P2PNetwork.is_p2p_match:
+		P2PNetwork.close_connection()
+
 	var title_path := "res://scenes/TitleScreen.tscn"
 
 	if not ResourceLoader.exists(title_path):
@@ -1121,9 +1165,104 @@ func _return_to_title() -> void:
 
 	if error != OK:
 		push_error(
-			"タイトル画面への移動に失敗しました。エラーコード: "
+			"タイトル画面への移動に失敗しました エラーコード: "
 			+ str(error)
 		)
+
+
+# 対戦準備ルームへ戻る（P2P接続を維持したまま再戦準備を行う）
+func _return_to_room() -> void:
+	if P2PNetwork.is_p2p_match and P2PNetwork.is_connected_peer:
+		P2PNetwork.send_message({"action": "return_to_room"})
+	P2PNetwork.is_p2p_match = false
+	var lobby_path := "res://scenes/P2PRoomLobby.tscn"
+	get_tree().change_scene_to_file(lobby_path)
+
+
+# 終局時の結果ダイアログを表示する
+func _show_game_over_dialog() -> void:
+	if game_over_dialog_layer != null:
+		return
+
+	game_over_dialog_layer = CanvasLayer.new()
+	game_over_dialog_layer.layer = 120
+	add_child(game_over_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.85)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	game_over_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(440, 260)
+	center.add_child(panel)
+
+	var is_win: bool = false
+	if P2PNetwork.is_p2p_match:
+		is_win = (winner == P2PNetwork.local_player_id)
+	else:
+		is_win = (winner == 0)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.11, 0.18, 0.98)
+	style.border_color = Color(0.84, 0.65, 0.30) if is_win else Color(0.40, 0.45, 0.55)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 18)
+	panel.add_child(vbox)
+
+	var win_title := Label.new()
+	win_title.text = "対局終了"
+	win_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	win_title.add_theme_font_size_override("font_size", 24)
+	win_title.add_theme_color_override("font_color", Color(0.84, 0.65, 0.30))
+	vbox.add_child(win_title)
+
+	var result_lbl := Label.new()
+	if P2PNetwork.is_p2p_match:
+		result_lbl.text = "あなたの勝利！" if is_win else "あなたの敗北..."
+		result_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50) if is_win else Color(1.0, 0.40, 0.40))
+	else:
+		result_lbl.text = "%sの勝利！" % ("先手" if winner == 0 else "後手")
+		result_lbl.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	result_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_lbl.add_theme_font_size_override("font_size", 20)
+	vbox.add_child(result_lbl)
+
+	# P2P対局時は「対戦準備ルームに戻る（再戦）」ボタン
+	if P2PNetwork.is_p2p_match:
+		var rematch_btn := Button.new()
+		rematch_btn.text = "対戦準備ルームに戻る (再戦)"
+		rematch_btn.custom_minimum_size = Vector2(0, 48)
+		rematch_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		rematch_btn.add_theme_font_size_override("font_size", 16)
+
+		var r_style := StyleBoxFlat.new()
+		r_style.bg_color = Color(0.18, 0.26, 0.40)
+		r_style.border_color = Color(0.84, 0.65, 0.30)
+		r_style.set_border_width_all(2)
+		r_style.set_corner_radius_all(6)
+		rematch_btn.add_theme_stylebox_override("normal", r_style)
+		rematch_btn.pressed.connect(_return_to_room)
+		vbox.add_child(rematch_btn)
+
+	var exit_btn := Button.new()
+	exit_btn.text = "タイトル画面に戻る"
+	exit_btn.custom_minimum_size = Vector2(0, 44)
+	exit_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	exit_btn.add_theme_font_size_override("font_size", 15)
+	exit_btn.pressed.connect(_return_to_title)
+	vbox.add_child(exit_btn)
 
 
 # 陣地の色は手番にかかわらず固定する。
@@ -1414,6 +1553,7 @@ func _draw() -> void:
 
 	if game_over:
 		status = "先手の勝利！" if winner == 0 else "後手の勝利！"
+		_show_game_over_dialog()
 
 	draw_string(
 		JP_FONT,

@@ -71,14 +71,24 @@ func _ready() -> void:
 	_build_ui()
 	_connect_network_signals()
 
+	# 対戦終了後に再戦のため戻ってきた場合、既に接続済みなので直接対戦準備ルームを表示する
+	if P2PNetwork.is_connected_peer:
+		_setup_connected_room_view()
+
 
 func _connect_network_signals() -> void:
-	P2PNetwork.session_code_ready.connect(_on_session_code_ready)
-	P2PNetwork.connection_established.connect(_on_connection_established)
-	P2PNetwork.connection_closed.connect(_on_connection_closed)
-	P2PNetwork.message_received.connect(_on_message_received)
-	P2PNetwork.log_updated.connect(_on_log_updated)
-	P2PNetwork.connection_error.connect(_on_connection_error)
+	if not P2PNetwork.session_code_ready.is_connected(_on_session_code_ready):
+		P2PNetwork.session_code_ready.connect(_on_session_code_ready)
+	if not P2PNetwork.connection_established.is_connected(_on_connection_established):
+		P2PNetwork.connection_established.connect(_on_connection_established)
+	if not P2PNetwork.connection_closed.is_connected(_on_connection_closed):
+		P2PNetwork.connection_closed.connect(_on_connection_closed)
+	if not P2PNetwork.message_received.is_connected(_on_message_received):
+		P2PNetwork.message_received.connect(_on_message_received)
+	if not P2PNetwork.log_updated.is_connected(_on_log_updated):
+		P2PNetwork.log_updated.connect(_on_log_updated)
+	if not P2PNetwork.connection_error.is_connected(_on_connection_error):
+		P2PNetwork.connection_error.connect(_on_connection_error)
 
 
 func _exit_tree() -> void:
@@ -463,8 +473,15 @@ func _on_guest_apply_offer_pressed() -> void:
 
 func _on_connection_established() -> void:
 	_on_log_updated("★ P2P接続が確立された 対戦準備ルームを開く...")
+	_setup_connected_room_view()
+
+
+# 接続維持状態で準備ルームを初期化する
+func _setup_connected_room_view() -> void:
 	connection_section.visible = false
 	room_section.visible = true
+	is_local_ready = false
+	is_opponent_ready = false
 
 	# ホストのみ手番設定を変更可能とする
 	if P2PNetwork.current_role == P2PNetwork.Role.HOST:
@@ -477,9 +494,10 @@ func _on_connection_established() -> void:
 		room_side_selector.disabled = true
 		room_side_info_label.text = "（ホストが手番を設定中である）"
 
-	# 初回プロファイル交換（名前と初期デッキ情報）
-	_send_room_profile()
+	_update_ready_button()
 	_update_room_display()
+	_send_room_profile()
+	_on_log_updated("対戦準備ルームに入った デッキ・手番を確認して準備完了を押してください")
 
 
 # 自身のプレイヤー情報（名前・デッキ・準備状態）を相手に送信する
