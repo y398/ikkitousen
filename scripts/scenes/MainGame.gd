@@ -339,10 +339,20 @@ func _initialize_p2p_match() -> void:
 	# 読み込み同期オーバーレイを表示し、相手に準備完了を送信する
 	_p2p_scene_ready_sent = true
 	_create_p2p_overlay("対戦相手の読み込みを待機しています...")
-	_send_p2p_action({"action": "scene_ready"})
+	_send_scene_ready_ping(0)
 
 	if _p2p_opponent_scene_ready:
 		_finish_scene_ready()
+
+
+# 相手が読み込み完了するまでscene_readyをリトライ送信する
+func _send_scene_ready_ping(retry_count: int) -> void:
+	if _p2p_opponent_scene_ready or p2p_overlay_layer == null:
+		return
+	P2PNetwork.send_message({"action": "scene_ready"})
+	if retry_count < 8:
+		var timer := get_tree().create_timer(0.5)
+		timer.timeout.connect(func(): _send_scene_ready_ping(retry_count + 1))
 
 
 # P2P対局のアクションパケットを送信する
@@ -357,12 +367,20 @@ func _send_p2p_action(data: Dictionary) -> void:
 # 相手プレイヤーから受信したアクションパケットを盤面に適用する
 func _on_p2p_message_received(msg: Dictionary) -> void:
 	var action: String = str(msg.get("action", ""))
+
+	# 相手から何らかのアクションパケットを受信した場合、相手は読み込み完了しているためオーバーレイを解除する
+	if action != "scene_ready" and action != "scene_ready_ack":
+		if not _p2p_opponent_scene_ready or p2p_overlay_layer != null:
+			_p2p_opponent_scene_ready = true
+			_finish_scene_ready()
+
 	_is_remote_action = true
 	match action:
 		"scene_ready":
 			_p2p_opponent_scene_ready = true
+			# _is_remote_actionガードを回避するため直接P2PNetworkからackを送信する
+			P2PNetwork.send_message({"action": "scene_ready_ack"})
 			if _p2p_scene_ready_sent:
-				_send_p2p_action({"action": "scene_ready_ack"})
 				_finish_scene_ready()
 		"scene_ready_ack":
 			_p2p_opponent_scene_ready = true

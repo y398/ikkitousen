@@ -45,7 +45,7 @@ func _ready() -> void:
 
 	var content_parent: Node = prompt_label.get_parent()
 	content_parent.add_child(choices_margin)
-	content_parent.move_child(choices_margin, prompt_label.get_index() + 1)
+	content_parent.move_child(choices_margin, prompt_label.get_index(true) + 1)
 
 	canceled.connect(_on_window_cancelled)
 	close_requested.connect(_on_window_close_requested)
