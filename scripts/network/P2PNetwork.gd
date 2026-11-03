@@ -33,10 +33,12 @@ var is_connected_peer: bool = false
 
 # 対局セッション同期用プロパティ
 var is_p2p_match: bool = false
-var local_player_id: int = 0 # 0: 先手(ホスト), 1: 後手(ゲスト)
+var local_player_id: int = 0 # 0: 先手, 1: 後手
 var shared_random_seed: int = 0
 var host_deck_profile: Dictionary = {}
 var guest_deck_profile: Dictionary = {}
+var local_nickname: String = "プレイヤー"
+var remote_nickname: String = "対戦相手"
 
 
 func _ready() -> void:
@@ -50,6 +52,12 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if peer != null:
 		peer.poll()
+		if is_connected_peer:
+			var conn_state := peer.get_connection_state()
+			if conn_state == WebRTCPeerConnection.STATE_DISCONNECTED or conn_state == WebRTCPeerConnection.STATE_FAILED or conn_state == WebRTCPeerConnection.STATE_CLOSED:
+				is_connected_peer = false
+				log_updated.emit("P2P接続が切断された")
+				connection_closed.emit()
 
 	if data_channel != null and data_channel.get_ready_state() == WebRTCDataChannel.STATE_OPEN:
 		if not is_connected_peer:

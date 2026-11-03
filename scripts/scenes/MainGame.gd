@@ -17,7 +17,7 @@ const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const DeckRules = preload("res://scripts/core/DeckRules.gd")
 const DeckLibrary = preload("res://scripts/core/DeckLibrary.gd")
 const PromotionChoiceDialog = preload("res://scripts/scenes/PromotionChoiceDialog.gd")
-const JP_FONT = preload("res://assets/fonts/NotoSansJP.ttf")
+const JP_FONT = preload("res://assets/fonts/NotoSansJP_Bold.tres")
 
 const BOARD_SIZE: int = 9
 # 段番号の漢数字表記
@@ -62,6 +62,11 @@ var context_action_button: Button
 # P2P通信対局用の同期フラグ
 var _is_remote_action: bool = false
 var _p2p_disconnected: bool = false
+var _p2p_scene_ready_sent: bool = false
+var _p2p_opponent_scene_ready: bool = false
+var p2p_overlay_layer: CanvasLayer
+var p2p_overlay_label: Label
+var disconnect_dialog_layer: CanvasLayer
 
 # 対局開始前に、先手・後手が使用する保存デッキを選ぶ
 var deck_library: Dictionary = {}
@@ -329,7 +334,15 @@ func _initialize_p2p_match() -> void:
 		print("P2P乱数シードを適用した: %d" % P2PNetwork.shared_random_seed)
 
 	_initialize_match_from_profiles(startup_players)
-	print("P2Pルームマッチを開始した　あなたの陣営: %s" % ("先手(ホスト)" if P2PNetwork.local_player_id == 0 else "後手(ゲスト)"))
+	print("P2Pルームマッチを開始した　あなたの陣営: %s" % ("先手" if P2PNetwork.local_player_id == 0 else "後手"))
+
+	# 読み込み同期オーバーレイを表示し、相手に準備完了を送信する
+	_p2p_scene_ready_sent = true
+	_create_p2p_overlay("対戦相手の読み込みを待機しています...")
+	_send_p2p_action({"action": "scene_ready"})
+
+	if _p2p_opponent_scene_ready:
+		_finish_scene_ready()
 
 
 # P2P対局のアクションパケットを送信する
@@ -346,6 +359,15 @@ func _on_p2p_message_received(msg: Dictionary) -> void:
 	var action: String = str(msg.get("action", ""))
 	_is_remote_action = true
 	match action:
+		"scene_ready":
+			_p2p_opponent_scene_ready = true
+			if _p2p_scene_ready_sent:
+				_send_p2p_action({"action": "scene_ready_ack"})
+				_finish_scene_ready()
+		"scene_ready_ack":
+			_p2p_opponent_scene_ready = true
+			if _p2p_scene_ready_sent:
+				_finish_scene_ready()
 		"summon":
 			var hand_idx: int = int(msg.get("hand_index", -1))
 			var remote_card_name: String = str(msg.get("card_name", ""))
@@ -447,7 +469,145 @@ func _execute_remote_move(move_from: Vector2i, move_to: Vector2i) -> void:
 func _on_p2p_connection_closed() -> void:
 	_p2p_disconnected = true
 	print("対戦相手との通信が切断された")
+	_show_disconnect_dialog()
 	queue_redraw()
+
+
+# 双方のシーン読み込みが完了した際の開始処理
+func _finish_scene_ready() -> void:
+	if p2p_overlay_label != null:
+		p2p_overlay_label.text = "対局準備完了！ 対局を開始します"
+		p2p_overlay_label.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50))
+	var timer := get_tree().create_timer(0.6)
+	timer.timeout.connect(func():
+		if p2p_overlay_layer != null:
+			p2p_overlay_layer.queue_free()
+			p2p_overlay_layer = null
+		queue_redraw()
+	)
+
+
+# P2P対局の読み込み同期オーバーレイを作成する
+func _create_p2p_overlay(initial_text: String) -> void:
+	if p2p_overlay_layer != null:
+		p2p_overlay_layer.queue_free()
+
+	p2p_overlay_layer = CanvasLayer.new()
+	p2p_overlay_layer.layer = 150
+	add_child(p2p_overlay_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.88)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	p2p_overlay_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(420, 180)
+	center.add_child(panel)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.11, 0.18, 0.96)
+	style.border_color = Color(0.84, 0.65, 0.30)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	panel.add_child(vbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "P2P通信対局"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.84, 0.65, 0.30))
+	vbox.add_child(title_lbl)
+
+	p2p_overlay_label = Label.new()
+	p2p_overlay_label.text = initial_text
+	p2p_overlay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	p2p_overlay_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	p2p_overlay_label.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(p2p_overlay_label)
+
+
+# 切断通知ダイアログを表示する
+func _show_disconnect_dialog() -> void:
+	if disconnect_dialog_layer != null:
+		return
+
+	# 読み込みオーバーレイがあれば消去する
+	if p2p_overlay_layer != null:
+		p2p_overlay_layer.queue_free()
+		p2p_overlay_layer = null
+
+	disconnect_dialog_layer = CanvasLayer.new()
+	disconnect_dialog_layer.layer = 200
+	add_child(disconnect_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.02, 0.04, 0.92)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	disconnect_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(440, 220)
+	center.add_child(panel)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.14, 0.06, 0.08, 0.98)
+	style.border_color = Color(0.95, 0.30, 0.30)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 18)
+	panel.add_child(vbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "通信が切断されました"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 22)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.35))
+	vbox.add_child(title_lbl)
+
+	var msg_lbl := Label.new()
+	msg_lbl.text = "対戦相手の通信が切断されたか、画面が閉じられました\n対局を終了します"
+	msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg_lbl.add_theme_font_size_override("font_size", 15)
+	msg_lbl.add_theme_color_override("font_color", Color(0.90, 0.92, 0.96))
+	vbox.add_child(msg_lbl)
+
+	var exit_btn := Button.new()
+	exit_btn.text = "タイトル画面に戻る"
+	exit_btn.custom_minimum_size = Vector2(0, 46)
+	exit_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	exit_btn.pressed.connect(_return_to_title)
+
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.28, 0.12, 0.15)
+	btn_style.border_color = Color(0.95, 0.40, 0.40)
+	btn_style.set_border_width_all(1)
+	btn_style.set_corner_radius_all(6)
+	exit_btn.add_theme_stylebox_override("normal", btn_style)
+	vbox.add_child(exit_btn)
+
 
 
 func _initialize_match_from_profiles(startup_players: Array) -> void:
@@ -1289,7 +1449,11 @@ func _draw() -> void:
 	# 先手情報：コスト、次ターン回復量、備蓄最大値を描画する
 	var sente_start_x := cur_x
 	var sente_rec := _calculate_expected_recovery(0)
-	var sente_label := "先手" + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 0 else "")
+	var sente_nick_suffix := ""
+	if P2PNetwork.is_p2p_match:
+		var s_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 0 else P2PNetwork.remote_nickname
+		sente_nick_suffix = " [%s]" % s_name
+	var sente_label := "先手%s" % sente_nick_suffix + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 0 else "")
 	var sente_main_text := "%s %d" % [sente_label, costs[0]]
 	var sente_rec_text := " (+%d)" % sente_rec
 	var sente_sub_text := "（備蓄%d/%d）" % [reserves[0], MAX_RESERVES]
@@ -1319,7 +1483,11 @@ func _draw() -> void:
 	# 後手情報：コスト、次ターン回復量、備蓄最大値を描画する
 	var gote_start_x := cur_x
 	var gote_rec := _calculate_expected_recovery(1)
-	var gote_label := "後手" + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 1 else "")
+	var gote_nick_suffix := ""
+	if P2PNetwork.is_p2p_match:
+		var g_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 1 else P2PNetwork.remote_nickname
+		gote_nick_suffix = " [%s]" % g_name
+	var gote_label := "後手%s" % gote_nick_suffix + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 1 else "")
 	var gote_main_text := "%s %d" % [gote_label, costs[1]]
 	var gote_rec_text := " (+%d)" % gote_rec
 	var gote_sub_text := "（備蓄%d/%d）" % [reserves[1], MAX_RESERVES]
@@ -3101,7 +3269,7 @@ func _input(event: InputEvent) -> void:
 
 	# P2P対局時の操作権制御
 	if P2PNetwork.is_p2p_match:
-		if _p2p_disconnected:
+		if _p2p_disconnected or p2p_overlay_layer != null or disconnect_dialog_layer != null:
 			return
 		# 伏兵・石落としの対象選択待ち
 		if pending_special_trap_waiting_for_target:

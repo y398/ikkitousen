@@ -1,6 +1,6 @@
 # ==================================================
 # ファイル名: P2PRoomLobby.gd
-# 概要: WebRTC手動シグナリングによるP2Pルームマッチ接続・デッキ交換・対局開始を行うロビー画面である
+# 概要: WebRTC手動シグナリングによるP2Pルームマッチ接続・ニックネーム・デッキ選択・手番決定・対局開始を行うロビー画面である
 # ==================================================
 
 extends Control
@@ -10,6 +10,7 @@ const DeckRules = preload("res://scripts/core/DeckRules.gd")
 
 const TITLE_SCENE_PATH := "res://scenes/TitleScreen.tscn"
 const GAME_SCENE_PATH := "res://scenes/MatchGame.tscn"
+const PLAYER_CONFIG_PATH := "user://player_profile.json"
 
 const BG_COLOR := Color(0.055, 0.075, 0.12)
 const PANEL_COLOR := Color(0.085, 0.11, 0.17)
@@ -22,8 +23,9 @@ var selected_deck_id: String = "deck_1"
 var my_profile: Dictionary = {}
 var opponent_profile: Dictionary = {}
 
-var deck_selector: OptionButton
-var status_label: Label
+# 接続前UI要素
+var connection_section: VBoxContainer
+var nickname_edit: LineEdit
 var host_button: Button
 var guest_button: Button
 var host_container: VBoxContainer
@@ -32,15 +34,27 @@ var host_offer_edit: TextEdit
 var host_answer_edit: TextEdit
 var guest_offer_edit: TextEdit
 var guest_answer_edit: TextEdit
-
 var host_copy_button: Button
 var host_connect_button: Button
 var guest_generate_button: Button
 var guest_copy_button: Button
 
-var is_deck_handshake_done: bool = false
-var is_opponent_ready: bool = false
+# 接続後（対戦準備ルーム）UI要素
+var room_section: VBoxContainer
+var room_user_info_label: Label
+var room_deck_selector: OptionButton
+var room_side_selector: OptionButton
+var room_side_info_label: Label
+var room_my_status_label: Label
+var room_opponent_status_label: Label
+var room_ready_button: Button
+var room_start_button: Button
+
+var status_label: Label
+
 var is_local_ready: bool = false
+var is_opponent_ready: bool = false
+var selected_side_mode: int = 0 # 0: ホスト先手, 1: ゲスト先手, 2: ランダム
 
 
 func _ready() -> void:
@@ -51,6 +65,8 @@ func _ready() -> void:
 	if not deck_library.has(selected_deck_id):
 		selected_deck_id = DeckLibrary.ordered_deck_ids(deck_library)[0]
 	my_profile = deck_library[selected_deck_id]
+
+	P2PNetwork.local_nickname = _load_nickname()
 
 	_build_ui()
 	_connect_network_signals()
@@ -96,13 +112,13 @@ func _build_ui() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scroll.offset_left = 60.0
+	scroll.offset_left = 40.0
 	scroll.offset_top = 70.0
-	scroll.offset_right = -60.0
+	scroll.offset_right = -40.0
 	scroll.offset_bottom = -20.0
 	add_child(scroll)
 
-	# 戻るボタン（スクロール領域より前面に配置してタッチイベントを確実に受ける）
+	# 戻るボタン（前面配置）
 	var back_btn := Button.new()
 	back_btn.text = "← タイトルへ戻る"
 	back_btn.offset_left = 20.0
@@ -121,47 +137,52 @@ func _build_ui() -> void:
 	scroll.add_child(root_vbox)
 
 	var title := Label.new()
-	title.text = "P2P ルームマッチ（手動シグナリング）"
-	title.add_theme_font_size_override("font_size", 24)
+	title.text = "P2P ルームマッチ"
+	title.add_theme_font_size_override("font_size", 26)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_vbox.add_child(title)
 
 	var desc := Label.new()
-	desc.text = "サーバーを介さず、接続コードをDiscord等のチャットに貼り合って直接通信対局を行う方式である"
-	desc.add_theme_font_size_override("font_size", 13)
+	desc.text = "サーバーを介さず、接続コードをチャット等で共有して直接対局を行う方式である"
+	desc.add_theme_font_size_override("font_size", 14)
 	desc.add_theme_color_override("font_color", MUTED_COLOR)
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_vbox.add_child(desc)
 
-	# 1. デッキ選択
-	var deck_panel := PanelContainer.new()
-	root_vbox.add_child(deck_panel)
-	var deck_vbox := VBoxContainer.new()
-	deck_vbox.add_theme_constant_override("separation", 8)
-	deck_panel.add_child(deck_vbox)
+	# ==========================================
+	# 1. 接続フェーズ（接続前UI）
+	# ==========================================
+	connection_section = VBoxContainer.new()
+	connection_section.add_theme_constant_override("separation", 14)
+	root_vbox.add_child(connection_section)
 
-	var deck_label := Label.new()
-	deck_label.text = "1. 使用する自分のデッキを選択"
-	deck_label.add_theme_font_size_override("font_size", 16)
-	deck_label.add_theme_color_override("font_color", ACCENT_COLOR)
-	deck_vbox.add_child(deck_label)
+	# ニックネーム入力パネル
+	var nick_panel := PanelContainer.new()
+	connection_section.add_child(nick_panel)
+	var nick_vbox := VBoxContainer.new()
+	nick_vbox.add_theme_constant_override("separation", 6)
+	nick_panel.add_child(nick_vbox)
 
-	deck_selector = OptionButton.new()
-	deck_selector.custom_minimum_size.y = 38
-	for deck_id in DeckLibrary.ordered_deck_ids(deck_library):
-		var profile: Dictionary = deck_library[deck_id]
-		deck_selector.add_item(str(profile.get("name", deck_id)))
-		deck_selector.set_item_metadata(deck_selector.item_count - 1, deck_id)
-	deck_selector.item_selected.connect(_on_deck_selected)
-	deck_vbox.add_child(deck_selector)
+	var nick_label := Label.new()
+	nick_label.text = "あなたのニックネーム"
+	nick_label.add_theme_font_size_override("font_size", 15)
+	nick_label.add_theme_color_override("font_color", ACCENT_COLOR)
+	nick_vbox.add_child(nick_label)
 
-	# 2. 役割選択ボタン
+	nickname_edit = LineEdit.new()
+	nickname_edit.text = P2PNetwork.local_nickname
+	nickname_edit.placeholder_text = "ニックネームを入力（次回も保存される）"
+	nickname_edit.custom_minimum_size.y = 42
+	nickname_edit.text_changed.connect(_on_nickname_changed)
+	nick_vbox.add_child(nickname_edit)
+
+	# 部屋作成・参加ボタン
 	var role_box := HBoxContainer.new()
 	role_box.add_theme_constant_override("separation", 16)
-	root_vbox.add_child(role_box)
+	connection_section.add_child(role_box)
 
 	host_button = Button.new()
-	host_button.text = "部屋を作る (ホスト・先手)"
+	host_button.text = "部屋を作る (ホスト)"
 	host_button.custom_minimum_size = Vector2(0, 48)
 	host_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_button(host_button, false)
@@ -169,18 +190,18 @@ func _build_ui() -> void:
 	role_box.add_child(host_button)
 
 	guest_button = Button.new()
-	guest_button.text = "部屋に入る (ゲスト・後手)"
+	guest_button.text = "部屋に入る (ゲスト)"
 	guest_button.custom_minimum_size = Vector2(0, 48)
 	guest_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_button(guest_button, false)
 	guest_button.pressed.connect(_on_start_guest_pressed)
 	role_box.add_child(guest_button)
 
-	# 3. ホスト用パネル
+	# ホスト用パネル
 	host_container = VBoxContainer.new()
 	host_container.visible = false
 	host_container.add_theme_constant_override("separation", 10)
-	root_vbox.add_child(host_container)
+	connection_section.add_child(host_container)
 
 	var host_step1_lbl := Label.new()
 	host_step1_lbl.text = "Step 1: あなたの接続コード（オファー）をコピーして相手に送信する"
@@ -205,7 +226,6 @@ func _build_ui() -> void:
 	host_step2_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	host_container.add_child(host_step2_lbl)
 
-	# 貼り付けボタン（タッチ操作・ブラウザ連携）
 	var host_paste_button := Button.new()
 	host_paste_button.text = "[貼付] クリップボードから貼り付け"
 	host_paste_button.custom_minimum_size.y = 42
@@ -219,24 +239,23 @@ func _build_ui() -> void:
 	host_container.add_child(host_answer_edit)
 
 	host_connect_button = Button.new()
-	host_connect_button.text = "アンサーを適用して対局を開始する"
+	host_connect_button.text = "アンサーを適用して接続する"
 	host_connect_button.custom_minimum_size.y = 46
 	_style_button(host_connect_button, true)
 	host_connect_button.pressed.connect(_on_host_apply_answer_pressed)
 	host_container.add_child(host_connect_button)
 
-	# 4. ゲスト用パネル
+	# ゲスト用パネル
 	guest_container = VBoxContainer.new()
 	guest_container.visible = false
 	guest_container.add_theme_constant_override("separation", 10)
-	root_vbox.add_child(guest_container)
+	connection_section.add_child(guest_container)
 
 	var guest_step1_lbl := Label.new()
 	guest_step1_lbl.text = "Step 1: ホストから受け取ったオファーコードを貼り付ける"
 	guest_step1_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
 	guest_container.add_child(guest_step1_lbl)
 
-	# 貼り付けボタン（タッチ操作・ブラウザ連携）
 	var guest_paste_button := Button.new()
 	guest_paste_button.text = "[貼付] クリップボードから貼り付け"
 	guest_paste_button.custom_minimum_size.y = 42
@@ -274,18 +293,125 @@ func _build_ui() -> void:
 	guest_copy_button.pressed.connect(func(): _copy_to_clipboard(guest_answer_edit.text, "アンサーコード"))
 	guest_container.add_child(guest_copy_button)
 
-	# ステータス表示
+	# ==========================================
+	# 2. 対戦準備ルーム（接続確立後UI）
+	# ==========================================
+	room_section = VBoxContainer.new()
+	room_section.visible = false
+	room_section.add_theme_constant_override("separation", 16)
+	root_vbox.add_child(room_section)
+
+	var room_card := PanelContainer.new()
+	room_section.add_child(room_card)
+	var room_vbox := VBoxContainer.new()
+	room_vbox.add_theme_constant_override("separation", 14)
+	room_card.add_child(room_vbox)
+
+	var room_header := Label.new()
+	room_header.text = "★ 接続完了 - 対戦準備ルーム"
+	room_header.add_theme_font_size_override("font_size", 20)
+	room_header.add_theme_color_override("font_color", ACCENT_COLOR)
+	room_vbox.add_child(room_header)
+
+	room_user_info_label = Label.new()
+	room_user_info_label.text = "あなた: %s\n相手: 接続待機中..." % P2PNetwork.local_nickname
+	room_user_info_label.add_theme_font_size_override("font_size", 16)
+	room_vbox.add_child(room_user_info_label)
+
+	# デッキ選択
+	var deck_box := VBoxContainer.new()
+	deck_box.add_theme_constant_override("separation", 6)
+	room_vbox.add_child(deck_box)
+
+	var deck_lbl := Label.new()
+	deck_lbl.text = "使用デッキの選択"
+	deck_lbl.add_theme_font_size_override("font_size", 15)
+	deck_lbl.add_theme_color_override("font_color", ACCENT_COLOR)
+	deck_box.add_child(deck_lbl)
+
+	room_deck_selector = OptionButton.new()
+	room_deck_selector.custom_minimum_size.y = 42
+	for deck_id in DeckLibrary.ordered_deck_ids(deck_library):
+		var profile: Dictionary = deck_library[deck_id]
+		room_deck_selector.add_item(str(profile.get("name", deck_id)))
+		room_deck_selector.set_item_metadata(room_deck_selector.item_count - 1, deck_id)
+		if deck_id == selected_deck_id:
+			room_deck_selector.select(room_deck_selector.item_count - 1)
+	room_deck_selector.item_selected.connect(_on_room_deck_selected)
+	deck_box.add_child(room_deck_selector)
+
+	# 手番設定
+	var side_box := VBoxContainer.new()
+	side_box.add_theme_constant_override("separation", 6)
+	room_vbox.add_child(side_box)
+
+	var side_title := Label.new()
+	side_title.text = "手番（先手・後手）の設定"
+	side_title.add_theme_font_size_override("font_size", 15)
+	side_title.add_theme_color_override("font_color", ACCENT_COLOR)
+	side_box.add_child(side_title)
+
+	room_side_selector = OptionButton.new()
+	room_side_selector.custom_minimum_size.y = 42
+	room_side_selector.add_item("ホストが先手 / ゲストが後手", 0)
+	room_side_selector.add_item("ゲストが先手 / ホストが後手", 1)
+	room_side_selector.add_item("ランダム（振り駒）", 2)
+	room_side_selector.select(0)
+	room_side_selector.item_selected.connect(_on_side_mode_selected)
+	side_box.add_child(room_side_selector)
+
+	room_side_info_label = Label.new()
+	room_side_info_label.text = "（ホストが手番設定を変更できます）"
+	room_side_info_label.add_theme_font_size_override("font_size", 13)
+	room_side_info_label.add_theme_color_override("font_color", MUTED_COLOR)
+	side_box.add_child(room_side_info_label)
+
+	# 準備状態表示
+	var status_box := HBoxContainer.new()
+	status_box.add_theme_constant_override("separation", 20)
+	room_vbox.add_child(status_box)
+
+	room_my_status_label = Label.new()
+	room_my_status_label.text = "あなた: 準備中"
+	room_my_status_label.add_theme_color_override("font_color", MUTED_COLOR)
+	status_box.add_child(room_my_status_label)
+
+	room_opponent_status_label = Label.new()
+	room_opponent_status_label.text = "相手: 準備中"
+	room_opponent_status_label.add_theme_color_override("font_color", MUTED_COLOR)
+	status_box.add_child(room_opponent_status_label)
+
+	# 準備完了ボタン
+	room_ready_button = Button.new()
+	room_ready_button.text = "準備完了にする"
+	room_ready_button.custom_minimum_size = Vector2(0, 50)
+	_style_button(room_ready_button, true)
+	room_ready_button.pressed.connect(_on_ready_button_pressed)
+	room_vbox.add_child(room_ready_button)
+
+	# ホスト専用の対局開始ボタン（双方が準備完了した際に有効化）
+	room_start_button = Button.new()
+	room_start_button.text = "対局を開始する"
+	room_start_button.custom_minimum_size = Vector2(0, 50)
+	room_start_button.visible = false
+	_style_button(room_start_button, true)
+	room_start_button.pressed.connect(_on_start_match_pressed)
+	room_vbox.add_child(room_start_button)
+
+	# 共通ステータス表示
 	status_label = Label.new()
-	status_label.text = "デッキを選択し、「部屋を作る」または「部屋に入る」を選択してください"
+	status_label.text = "ニックネームを確認し、「部屋を作る」または「部屋に入る」を選択してください"
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.add_theme_color_override("font_color", ACCENT_COLOR)
 	root_vbox.add_child(status_label)
 
 
-func _on_deck_selected(index: int) -> void:
-	selected_deck_id = str(deck_selector.get_item_metadata(index))
-	my_profile = deck_library[selected_deck_id]
-	_on_log_updated("使用デッキを変更した: %s" % str(my_profile.get("name", selected_deck_id)))
+func _on_nickname_changed(new_text: String) -> void:
+	var cleaned := new_text.strip_edges()
+	if cleaned.is_empty():
+		cleaned = "プレイヤー"
+	P2PNetwork.local_nickname = cleaned
+	_save_nickname(cleaned)
 
 
 func _on_start_host_pressed() -> void:
@@ -293,7 +419,7 @@ func _on_start_host_pressed() -> void:
 	guest_container.visible = false
 	host_button.disabled = true
 	guest_button.disabled = true
-	deck_selector.disabled = true
+	nickname_edit.editable = false
 	_on_log_updated("ホストとして部屋を作成中である...")
 	P2PNetwork.start_host()
 
@@ -303,7 +429,7 @@ func _on_start_guest_pressed() -> void:
 	guest_container.visible = true
 	host_button.disabled = true
 	guest_button.disabled = true
-	deck_selector.disabled = true
+	nickname_edit.editable = false
 	_on_log_updated("ゲストとして待機中である ホストのオファーコードを貼り付けてください")
 	P2PNetwork.start_guest()
 
@@ -311,10 +437,10 @@ func _on_start_guest_pressed() -> void:
 func _on_session_code_ready(type: String, code: String) -> void:
 	if type == "offer":
 		host_offer_edit.text = code
-		_on_log_updated("オファーコード生成完了 コードをコピーして相手に送信してください")
+		_on_log_updated("オファーコード生成完了 コードを相手に共有してください")
 	elif type == "answer":
 		guest_answer_edit.text = code
-		_on_log_updated("アンサーコード生成完了 コードをコピーしてホストに返信してください")
+		_on_log_updated("アンサーコード生成完了 コードをホストに返信してください")
 
 
 func _on_host_apply_answer_pressed() -> void:
@@ -336,76 +462,204 @@ func _on_guest_apply_offer_pressed() -> void:
 
 
 func _on_connection_established() -> void:
-	_on_log_updated("★ P2P接続が確立された デッキ情報の交換を開始する...")
-	is_deck_handshake_done = false
-	is_opponent_ready = false
-	is_local_ready = false
+	_on_log_updated("★ P2P接続が確立された 対戦準備ルームを開く...")
+	connection_section.visible = false
+	room_section.visible = true
 
-	# 接続確立後、お互いのデッキプロファイルを交換する
-	# ホスト側が対局共通の乱数シードを一度だけ生成して保持する
+	# ホストのみ手番設定を変更可能とする
 	if P2PNetwork.current_role == P2PNetwork.Role.HOST:
-		var generated_seed := randi()
-		if generated_seed == 0:
-			generated_seed = 1
-		P2PNetwork.shared_random_seed = generated_seed
+		room_side_selector.disabled = false
+		room_side_info_label.text = "手番（先手・後手）を選択してください"
+		P2PNetwork.shared_random_seed = randi()
+		if P2PNetwork.shared_random_seed == 0:
+			P2PNetwork.shared_random_seed = 1
 	else:
-		P2PNetwork.shared_random_seed = 0
+		room_side_selector.disabled = true
+		room_side_info_label.text = "（ホストが手番を設定中である）"
 
-	var payload := {
-		"action": "deck_handshake",
-		"sender_role": "host" if P2PNetwork.current_role == P2PNetwork.Role.HOST else "guest",
+	# 初回プロファイル交換（名前と初期デッキ情報）
+	_send_room_profile()
+	_update_room_display()
+
+
+# 自身のプレイヤー情報（名前・デッキ・準備状態）を相手に送信する
+func _send_room_profile() -> void:
+	P2PNetwork.send_message({
+		"action": "room_sync",
+		"nickname": P2PNetwork.local_nickname,
 		"deck_profile": my_profile,
-		"seed": P2PNetwork.shared_random_seed
-	}
-	P2PNetwork.send_message(payload)
+		"is_ready": is_local_ready,
+		"side_mode": selected_side_mode
+	})
+
+
+func _on_room_deck_selected(index: int) -> void:
+	selected_deck_id = str(room_deck_selector.get_item_metadata(index))
+	my_profile = deck_library[selected_deck_id]
+	_on_log_updated("デッキを変更した: %s" % str(my_profile.get("name", selected_deck_id)))
+	is_local_ready = false
+	_update_ready_button()
+	_send_room_profile()
+
+
+func _on_side_mode_selected(index: int) -> void:
+	if P2PNetwork.current_role != P2PNetwork.Role.HOST:
+		return
+	selected_side_mode = index
+	is_local_ready = false
+	_update_ready_button()
+	_send_room_profile()
+
+
+func _on_ready_button_pressed() -> void:
+	is_local_ready = not is_local_ready
+	_update_ready_button()
+	_send_room_profile()
+	_check_both_ready()
+
+
+func _update_ready_button() -> void:
+	if is_local_ready:
+		room_ready_button.text = "✓ 準備完了済み (解除する)"
+		room_my_status_label.text = "あなた: 準備完了！"
+		room_my_status_label.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50))
+	else:
+		room_ready_button.text = "準備完了にする"
+		room_my_status_label.text = "あなた: 準備中"
+		room_my_status_label.add_theme_color_override("font_color", MUTED_COLOR)
+
+
+func _update_room_display() -> void:
+	room_user_info_label.text = "あなた: %s\n相手: %s" % [
+		P2PNetwork.local_nickname,
+		P2PNetwork.remote_nickname
+	]
+
+	if is_opponent_ready:
+		room_opponent_status_label.text = "相手: 準備完了！"
+		room_opponent_status_label.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50))
+	else:
+		room_opponent_status_label.text = "相手: 準備中"
+		room_opponent_status_label.add_theme_color_override("font_color", MUTED_COLOR)
 
 
 func _on_message_received(msg: Dictionary) -> void:
 	var action := str(msg.get("action", ""))
 	match action:
-		"deck_handshake":
-			_handle_deck_handshake(msg)
-		"ready_to_play":
-			is_opponent_ready = true
-			_check_start_match()
+		"room_sync":
+			_handle_room_sync(msg)
+		"start_match":
+			_handle_start_match(msg)
 
 
-func _handle_deck_handshake(msg: Dictionary) -> void:
-	opponent_profile = msg.get("deck_profile", {})
-	var validation := DeckLibrary.validate_playable_profile(opponent_profile)
-	if not bool(validation.get("valid", false)):
-		_on_log_updated("エラー: 相手のデッキが対局ルールを満たしていない")
+func _handle_room_sync(msg: Dictionary) -> void:
+	var rem_nick := str(msg.get("nickname", "対戦相手")).strip_edges()
+	if not rem_nick.is_empty():
+		P2PNetwork.remote_nickname = rem_nick
+	
+	if msg.has("deck_profile"):
+		opponent_profile = msg.get("deck_profile", {})
+
+	is_opponent_ready = bool(msg.get("is_ready", false))
+
+	# ゲスト側はホストの手番設定を同期する
+	if P2PNetwork.current_role == P2PNetwork.Role.GUEST and msg.has("side_mode"):
+		selected_side_mode = int(msg.get("side_mode", 0))
+		room_side_selector.select(selected_side_mode)
+
+	_update_room_display()
+	_check_both_ready()
+
+
+func _check_both_ready() -> void:
+	if P2PNetwork.current_role == P2PNetwork.Role.HOST:
+		if is_local_ready and is_opponent_ready:
+			room_start_button.visible = true
+			room_start_button.disabled = false
+			_on_log_updated("双方の準備が完了した 「対局を開始する」を押してください")
+		else:
+			room_start_button.visible = false
+	else:
+		if is_local_ready and is_opponent_ready:
+			_on_log_updated("双方の準備完了 ホストの対局開始を待機中である...")
+
+
+func _on_start_match_pressed() -> void:
+	if P2PNetwork.current_role != P2PNetwork.Role.HOST:
+		return
+	if not (is_local_ready and is_opponent_ready):
 		return
 
-	var sender_role := str(msg.get("sender_role", ""))
-	if sender_role == "host":
-		# ゲスト側はホストから届いた乱数シードを採用する
-		P2PNetwork.shared_random_seed = int(msg.get("seed", 0))
-		P2PNetwork.host_deck_profile = opponent_profile
-		P2PNetwork.guest_deck_profile = my_profile
-		P2PNetwork.local_player_id = 1
+	# 手番を決定する
+	var final_sente_is_host: bool = true
+	match selected_side_mode:
+		0:
+			final_sente_is_host = true
+		1:
+			final_sente_is_host = false
+		2:
+			final_sente_is_host = (randi() % 2 == 0)
+
+	var match_seed := P2PNetwork.shared_random_seed
+	if match_seed == 0:
+		match_seed = randi()
+		if match_seed == 0:
+			match_seed = 1
+		P2PNetwork.shared_random_seed = match_seed
+
+	# ゲストへ対局開始パケットを送信する
+	P2PNetwork.send_message({
+		"action": "start_match",
+		"sente_is_host": final_sente_is_host,
+		"seed": match_seed,
+		"host_profile": my_profile,
+		"guest_profile": opponent_profile
+	})
+
+	_launch_game(final_sente_is_host, match_seed, my_profile, opponent_profile)
+
+
+func _handle_start_match(msg: Dictionary) -> void:
+	var final_sente_is_host: bool = bool(msg.get("sente_is_host", true))
+	var match_seed: int = int(msg.get("seed", 1))
+	var host_prof: Dictionary = msg.get("host_profile", opponent_profile)
+	var guest_prof: Dictionary = msg.get("guest_profile", my_profile)
+
+	_launch_game(final_sente_is_host, match_seed, host_prof, guest_prof)
+
+
+func _launch_game(final_sente_is_host: bool, match_seed: int, host_prof: Dictionary, guest_prof: Dictionary) -> void:
+	P2PNetwork.shared_random_seed = match_seed
+
+	# 先手（インデックス0）と後手（インデックス1）のプロファイルを決定する
+	if final_sente_is_host:
+		P2PNetwork.host_deck_profile = host_prof  # 先手
+		P2PNetwork.guest_deck_profile = guest_prof # 後手
+		P2PNetwork.local_player_id = 0 if P2PNetwork.current_role == P2PNetwork.Role.HOST else 1
 	else:
-		# ホスト側は自身が生成済みの乱数シードを維持する
-		P2PNetwork.host_deck_profile = my_profile
-		P2PNetwork.guest_deck_profile = opponent_profile
-		P2PNetwork.local_player_id = 0
+		P2PNetwork.host_deck_profile = guest_prof # 先手
+		P2PNetwork.guest_deck_profile = host_prof  # 後手
+		P2PNetwork.local_player_id = 1 if P2PNetwork.current_role == P2PNetwork.Role.HOST else 0
 
-	_on_log_updated("相手のデッキ（%s）を受信・検証完了した 準備完了を送信する" % str(opponent_profile.get("name", "相手デッキ")))
-	is_deck_handshake_done = true
-	is_local_ready = true
-	P2PNetwork.send_message({"action": "ready_to_play"})
-	_check_start_match()
-
-
-func _check_start_match() -> void:
-	if is_local_ready and is_opponent_ready:
-		_on_log_updated("双方の準備完了 対局画面へ遷移する...")
-		P2PNetwork.is_p2p_match = true
-		get_tree().change_scene_to_file(GAME_SCENE_PATH)
+	P2PNetwork.is_p2p_match = true
+	_on_log_updated("対局画面へ遷移する（あなたの手番: %s）..." % ("先手" if P2PNetwork.local_player_id == 0 else "後手"))
+	get_tree().change_scene_to_file(GAME_SCENE_PATH)
 
 
 func _on_connection_closed() -> void:
 	_on_log_updated("通信が切断された")
+	is_local_ready = false
+	is_opponent_ready = false
+	if room_section != null:
+		room_section.visible = false
+	if connection_section != null:
+		connection_section.visible = true
+	if host_button != null:
+		host_button.disabled = false
+	if guest_button != null:
+		guest_button.disabled = false
+	if nickname_edit != null:
+		nickname_edit.editable = true
 
 
 func _on_connection_error(error_msg: String) -> void:
@@ -437,7 +691,6 @@ func _copy_to_clipboard(text: String, label_hint: String) -> void:
 func _paste_to_target(target_edit: TextEdit) -> void:
 	if target_edit == null:
 		return
-	# Web環境では長押しメニューが出にくいためwindow.promptで入力を受け取る
 	if OS.has_feature("web"):
 		var js_code := """
 			(function() {
@@ -504,3 +757,20 @@ func _style_button(btn: Button, is_accent: bool = false) -> void:
 	btn.add_theme_color_override("font_disabled_color", Color(0.55, 0.60, 0.68))
 
 
+# ニックネームのロード処理である
+func _load_nickname() -> String:
+	if FileAccess.file_exists(PLAYER_CONFIG_PATH):
+		var file := FileAccess.open(PLAYER_CONFIG_PATH, FileAccess.READ)
+		if file != null:
+			var text := file.get_as_text()
+			var json: Variant = JSON.parse_string(text)
+			if json is Dictionary and json.has("nickname"):
+				return str(json["nickname"]).strip_edges()
+	return "プレイヤー"
+
+
+# ニックネームのセーブ処理である
+func _save_nickname(nick: String) -> void:
+	var file := FileAccess.open(PLAYER_CONFIG_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify({"nickname": nick}))

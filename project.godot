@@ -26,7 +26,7 @@ window/dpi/allow_hidpi=true
 
 [gui]
 
-theme/custom_font="res://assets/fonts/NotoSansJP.ttf"
+theme/custom_font="res://assets/fonts/NotoSansJP_Bold.tres"
 
 [input_devices]
 
