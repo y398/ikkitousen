@@ -643,19 +643,20 @@ func _create_title_return_button() -> void:
 	var button := Button.new()
 	button.text = "タイトルへ戻る"
 	button.tooltip_text = "タイトル画面に戻ります"
-	button.custom_minimum_size = Vector2(150, 42)
+	button.custom_minimum_size = Vector2(160, 46)
 	button.focus_mode = Control.FOCUS_NONE
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	button.add_theme_font_size_override("font_size", 15)
 
-	# 画面左下に固定
+	# 画面左上に配置
 	button.anchor_left = 0.0
 	button.anchor_right = 0.0
 	button.anchor_top = 0.0
 	button.anchor_bottom = 0.0
 	button.offset_left = 16.0
-	button.offset_right = 166.0
-	button.offset_top = 8.0
-	button.offset_bottom = 50.0
+	button.offset_right = 176.0
+	button.offset_top = 10.0
+	button.offset_bottom = 56.0
 
 	# ボタンの色
 	var normal_style := StyleBoxFlat.new()
@@ -1163,9 +1164,10 @@ func _get_piece_display_label(piece: Dictionary) -> String:
 			return piece_name
 
 
-# 将棋の駒形を描画する　先手は画面上向き、後手は画面下向きに尖らせる
+# 将棋の駒形を描画する　手前のプレイヤーの駒は画面上向き、奥のプレイヤーの駒は画面下向きに尖らせる
 func _draw_shogi_piece(center: Vector2, piece_owner: int, border_color: Color, label: String) -> void:
-	var forward_sign: float = -1.0 if piece_owner == 0 else 1.0
+	var bottom_player: int = 1 if _is_board_rotated() else 0
+	var forward_sign: float = -1.0 if piece_owner == bottom_player else 1.0
 	var points := PackedVector2Array([
 		center + Vector2(0.0, 22.0 * forward_sign),
 		center + Vector2(20.0, 5.0 * forward_sign),
@@ -3339,8 +3341,8 @@ func _side_label(player: int) -> String:
 
 func _is_board_rotated() -> bool:
 	if P2PNetwork.is_p2p_match:
-		return P2PNetwork.local_player_id == 0
-	return shared_test_mode and local_test_player == 0
+		return P2PNetwork.local_player_id == 1
+	return shared_test_mode and local_test_player == 1
 
 
 # 表示上の行・列から、ゲーム内部の論理座標（段x・筋y）へ変換する。

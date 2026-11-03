@@ -94,23 +94,26 @@ func _build_ui() -> void:
 	top_bar.offset_bottom = 4.0
 	add_child(top_bar)
 
-	# 戻るボタン
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.offset_left = 60.0
+	scroll.offset_top = 70.0
+	scroll.offset_right = -60.0
+	scroll.offset_bottom = -20.0
+	add_child(scroll)
+
+	# 戻るボタン（スクロール領域より前面に配置してタッチイベントを確実に受ける）
 	var back_btn := Button.new()
 	back_btn.text = "← タイトルへ戻る"
 	back_btn.offset_left = 20.0
 	back_btn.offset_top = 16.0
-	back_btn.offset_right = 160.0
-	back_btn.offset_bottom = 54.0
+	back_btn.offset_right = 170.0
+	back_btn.offset_bottom = 58.0
+	back_btn.custom_minimum_size = Vector2(150, 42)
+	back_btn.z_index = 10
+	back_btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	back_btn.pressed.connect(_on_back_to_title_pressed)
 	add_child(back_btn)
-
-	var scroll := ScrollContainer.new()
-	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scroll.offset_left = 60.0
-	scroll.offset_top = 65.0
-	scroll.offset_right = -60.0
-	scroll.offset_bottom = -20.0
-	add_child(scroll)
 
 	var root_vbox := VBoxContainer.new()
 	root_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -188,13 +191,22 @@ func _build_ui() -> void:
 
 	host_copy_button = Button.new()
 	host_copy_button.text = "接続コードをクリップボードにコピー"
-	host_copy_button.custom_minimum_size.y = 36
-	host_copy_button.pressed.connect(func(): DisplayServer.clipboard_set(host_offer_edit.text))
+	host_copy_button.custom_minimum_size.y = 40
+	host_copy_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	host_copy_button.pressed.connect(func(): _copy_to_clipboard(host_offer_edit.text, "オファーコード"))
 	host_container.add_child(host_copy_button)
 
 	var host_step2_lbl := Label.new()
 	host_step2_lbl.text = "Step 2: 相手から返信されたアンサーコードをここに貼り付けて接続する"
 	host_container.add_child(host_step2_lbl)
+
+	# 貼り付けボタン（タッチ操作・ブラウザ連携）
+	var host_paste_button := Button.new()
+	host_paste_button.text = "📋 クリップボードから貼り付け"
+	host_paste_button.custom_minimum_size.y = 40
+	host_paste_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	host_paste_button.pressed.connect(func(): _paste_to_target(host_answer_edit))
+	host_container.add_child(host_paste_button)
 
 	host_answer_edit = TextEdit.new()
 	host_answer_edit.custom_minimum_size.y = 80
@@ -203,7 +215,8 @@ func _build_ui() -> void:
 
 	host_connect_button = Button.new()
 	host_connect_button.text = "アンサーを適用して対局を開始する"
-	host_connect_button.custom_minimum_size.y = 42
+	host_connect_button.custom_minimum_size.y = 44
+	host_connect_button.mouse_filter = Control.MOUSE_FILTER_STOP
 	host_connect_button.pressed.connect(_on_host_apply_answer_pressed)
 	host_container.add_child(host_connect_button)
 
@@ -217,6 +230,14 @@ func _build_ui() -> void:
 	guest_step1_lbl.text = "Step 1: ホストから受け取ったオファーコードを貼り付ける"
 	guest_container.add_child(guest_step1_lbl)
 
+	# 貼り付けボタン（タッチ操作・ブラウザ連携）
+	var guest_paste_button := Button.new()
+	guest_paste_button.text = "📋 クリップボードから貼り付け"
+	guest_paste_button.custom_minimum_size.y = 40
+	guest_paste_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	guest_paste_button.pressed.connect(func(): _paste_to_target(guest_offer_edit))
+	guest_container.add_child(guest_paste_button)
+
 	guest_offer_edit = TextEdit.new()
 	guest_offer_edit.custom_minimum_size.y = 80
 	guest_offer_edit.placeholder_text = "ここにホストのオファーコードを貼り付ける"
@@ -224,7 +245,8 @@ func _build_ui() -> void:
 
 	guest_generate_button = Button.new()
 	guest_generate_button.text = "オファーを読み込み、返信コード（アンサー）を生成する"
-	guest_generate_button.custom_minimum_size.y = 38
+	guest_generate_button.custom_minimum_size.y = 44
+	guest_generate_button.mouse_filter = Control.MOUSE_FILTER_STOP
 	guest_generate_button.pressed.connect(_on_guest_apply_offer_pressed)
 	guest_container.add_child(guest_generate_button)
 
@@ -240,8 +262,9 @@ func _build_ui() -> void:
 
 	guest_copy_button = Button.new()
 	guest_copy_button.text = "アンサーコードをクリップボードにコピー"
-	guest_copy_button.custom_minimum_size.y = 36
-	guest_copy_button.pressed.connect(func(): DisplayServer.clipboard_set(guest_answer_edit.text))
+	guest_copy_button.custom_minimum_size.y = 40
+	guest_copy_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	guest_copy_button.pressed.connect(func(): _copy_to_clipboard(guest_answer_edit.text, "アンサーコード"))
 	guest_container.add_child(guest_copy_button)
 
 	# ステータス表示
@@ -383,3 +406,39 @@ func _on_log_updated(text: String) -> void:
 func _on_back_to_title_pressed() -> void:
 	P2PNetwork.close_connection()
 	get_tree().change_scene_to_file(TITLE_SCENE_PATH)
+
+
+# クリップボードへテキストをコピーする
+func _copy_to_clipboard(text: String, label_hint: String) -> void:
+	DisplayServer.clipboard_set(text)
+	if OS.has_feature("web"):
+		var escaped := text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "")
+		var js_code := 'navigator.clipboard.writeText("%s").catch(function(e) { console.error(e); });' % escaped
+		JavaScriptBridge.eval(js_code)
+	_on_log_updated("%sをクリップボードにコピーした" % label_hint)
+
+
+# ターゲットのエディットにクリップボードまたはプロンプト入力を反映する
+func _paste_to_target(target_edit: TextEdit) -> void:
+	if target_edit == null:
+		return
+	# Web環境では長押しメニューが出にくいためwindow.promptで入力を受け取る
+	if OS.has_feature("web"):
+		var js_code := """
+			(function() {
+				var pasted = window.prompt("接続コードを貼り付けてください（長押しでペースト）:") || "";
+				return pasted;
+			})()
+		"""
+		var result: Variant = JavaScriptBridge.eval(js_code)
+		if result != null and not str(result).strip_edges().is_empty():
+			target_edit.text = str(result).strip_edges()
+			_on_log_updated("コードを貼り付けた")
+			return
+	var clip_text := DisplayServer.clipboard_get().strip_edges()
+	if not clip_text.is_empty():
+		target_edit.text = clip_text
+		_on_log_updated("クリップボードから貼り付けた")
+	else:
+		_on_log_updated("クリップボードが空、またはアクセス許可が得られなかった")
+
