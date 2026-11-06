@@ -48,8 +48,8 @@ const CENTER_SQUARES: Array[Vector2i] = [
 static func evaluate_board(
 	pieces: Dictionary,
 	evaluating_player: int,
-	costs: Array[int],
-	reserves: Array[int],
+	costs: Array,
+	reserves: Array,
 	hands: Array
 ) -> float:
 	var opponent := 1 - evaluating_player
@@ -179,8 +179,8 @@ static func _calculate_board_control(pieces: Dictionary, evaluating_player: int)
 # コスト・備蓄・手札枚数のアドバンテージを計算する
 static func _calculate_resource_score(
 	evaluating_player: int,
-	costs: Array[int],
-	reserves: Array[int],
+	costs: Array,
+	reserves: Array,
 	hands: Array
 ) -> float:
 	var opp := 1 - evaluating_player

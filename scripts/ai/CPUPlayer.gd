@@ -45,7 +45,8 @@ func decide_next_action() -> Dictionary:
 		return {"action": "end_turn"}
 
 	# 手札超過モード中の場合は破棄するカードを選ぶ
-	if bool(game_ref.discard_mode) or game_ref.hands[player_id].size() > 5:
+	var discard_flag = game_ref.get("discard_mode")
+	if (discard_flag != null and bool(discard_flag)) or game_ref.hands[player_id].size() > 5:
 		return _decide_discard_card()
 
 	# 難易度別の思考ルーチン
@@ -256,7 +257,9 @@ func _generate_all_legal_actions() -> Array[Dictionary]:
 	actions.append_array(_generate_summon_actions(current_cost))
 
 	# 2 盤上の駒移動候補を生成する（コスト1以上が必要、かつ1ターン1回移動制限）
-	if current_cost >= 1 and not bool(game_ref.has_moved_this_turn):
+	var moved_flag = game_ref.get("has_moved_this_turn")
+	var has_moved: bool = moved_flag != null and bool(moved_flag)
+	if current_cost >= 1 and not has_moved:
 		actions.append_array(_generate_move_actions())
 
 	return actions
@@ -276,11 +279,14 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 		var category: String = str(card.get("category", ""))
 
 		# 1ターン内の各カテゴリ召喚回数制限チェック
-		if category == "兵" and bool(game_ref.has_summoned_soldier[player_id]):
+		var s_soldier = game_ref.get("has_summoned_soldier")
+		if category == "兵" and s_soldier != null and bool(s_soldier[player_id]):
 			continue
-		if category == "壁" and bool(game_ref.has_summoned_wall[player_id]):
+		var s_wall = game_ref.get("has_summoned_wall")
+		if category == "壁" and s_wall != null and bool(s_wall[player_id]):
 			continue
-		if category == "罠" and bool(game_ref.has_summoned_trap[player_id]):
+		var s_trap = game_ref.get("has_summoned_trap")
+		if category == "罠" and s_trap != null and bool(s_trap[player_id]):
 			continue
 
 		# 召喚可能なマスを走査する
