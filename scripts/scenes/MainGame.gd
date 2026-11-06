@@ -17,6 +17,8 @@ const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const DeckRules = preload("res://scripts/core/DeckRules.gd")
 const DeckLibrary = preload("res://scripts/core/DeckLibrary.gd")
 const PromotionChoiceDialog = preload("res://scripts/scenes/PromotionChoiceDialog.gd")
+const CPUPlayer = preload("res://scripts/ai/CPUPlayer.gd")
+const BoardEvaluator = preload("res://scripts/ai/BoardEvaluator.gd")
 const JP_FONT = preload("res://assets/fonts/NotoSansJP_Bold.tres")
 
 const BOARD_SIZE: int = 9
@@ -68,6 +70,22 @@ var p2p_overlay_layer: CanvasLayer
 var p2p_overlay_label: Label
 var disconnect_dialog_layer: CanvasLayer
 var game_over_dialog_layer: CanvasLayer
+
+# CPU対局関連の制御状態
+var is_cpu_match: bool = false
+var cpu_difficulty: String = "normal"
+var human_player_id: int = 0
+var cpu_player_id: int = 1
+var cpu_player_instance: CPUPlayer = null
+var is_cpu_thinking: bool = false
+
+# 対局設定ダイアログ用のUI要素
+var match_mode_cpu_button: Button
+var match_mode_local_button: Button
+var cpu_difficulty_selector: OptionButton
+var player_side_selector: OptionButton
+var cpu_settings_container: VBoxContainer
+var is_selected_mode_cpu: bool = true
 
 # 対局開始前に、先手・後手が使用する保存デッキを選ぶ
 var deck_library: Dictionary = {}
@@ -196,45 +214,157 @@ func _create_deck_selection_overlay(preferred_first_id: String) -> void:
 	backdrop.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(520, 380)
+	panel.custom_minimum_size = Vector2(560, 480)
 	center.add_child(panel)
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 22)
-	margin.add_theme_constant_override("margin_right", 22)
-	margin.add_theme_constant_override("margin_top", 22)
-	margin.add_theme_constant_override("margin_bottom", 22)
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 24)
 	panel.add_child(margin)
 	var layout := VBoxContainer.new()
-	layout.add_theme_constant_override("separation", 12)
+	layout.add_theme_constant_override("separation", 14)
 	margin.add_child(layout)
 
 	var title := Label.new()
-	title.text = "対局で使用するデッキを選択"
+	title.text = "対局設定"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 24)
 	layout.add_child(title)
-	var explanation := Label.new()
-	explanation.text = "先手・後手それぞれに保存済みデッキを適用します。デッキ構築画面で複数のデッキを作成・保存できます。"
-	explanation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	layout.add_child(explanation)
 
+	# モード選択タブ（CPU対戦 / ローカル2人対戦）
+	var mode_row := HBoxContainer.new()
+	mode_row.add_theme_constant_override("separation", 10)
+	layout.add_child(mode_row)
+
+	match_mode_cpu_button = Button.new()
+	match_mode_cpu_button.text = "CPU対局"
+	match_mode_cpu_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	match_mode_cpu_button.custom_minimum_size = Vector2(0, 38)
+	match_mode_cpu_button.pressed.connect(func(): _set_match_mode(true))
+	mode_row.add_child(match_mode_cpu_button)
+
+	match_mode_local_button = Button.new()
+	match_mode_local_button.text = "ローカル2人対局"
+	match_mode_local_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	match_mode_local_button.custom_minimum_size = Vector2(0, 38)
+	match_mode_local_button.pressed.connect(func(): _set_match_mode(false))
+	mode_row.add_child(match_mode_local_button)
+
+	# CPU対局の設定コンテナ
+	cpu_settings_container = VBoxContainer.new()
+	cpu_settings_container.add_theme_constant_override("separation", 10)
+	layout.add_child(cpu_settings_container)
+
+	# 難易度設定行
+	var diff_row := HBoxContainer.new()
+	diff_row.add_theme_constant_override("separation", 10)
+	cpu_settings_container.add_child(diff_row)
+	var diff_label := Label.new()
+	diff_label.text = "CPUの強さ"
+	diff_label.custom_minimum_size = Vector2(110, 0)
+	diff_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	diff_row.add_child(diff_label)
+	cpu_difficulty_selector = OptionButton.new()
+	cpu_difficulty_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cpu_difficulty_selector.add_item("初級（初心者向け・ゆったり思考）")
+	cpu_difficulty_selector.set_item_metadata(0, "easy")
+	cpu_difficulty_selector.add_item("中級（バランス重視・手堅い指し手）")
+	cpu_difficulty_selector.set_item_metadata(1, "normal")
+	cpu_difficulty_selector.add_item("最強（人間が勝てない超深度探索）")
+	cpu_difficulty_selector.set_item_metadata(2, "hard")
+	cpu_difficulty_selector.select(1)
+	diff_row.add_child(cpu_difficulty_selector)
+
+	# 手番設定行
+	var side_row := HBoxContainer.new()
+	side_row.add_theme_constant_override("separation", 10)
+	cpu_settings_container.add_child(side_row)
+	var side_label := Label.new()
+	side_label.text = "あなたの手番"
+	side_label.custom_minimum_size = Vector2(110, 0)
+	side_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	side_row.add_child(side_label)
+	player_side_selector = OptionButton.new()
+	player_side_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	player_side_selector.add_item("先手（先攻・盤面手前）")
+	player_side_selector.set_item_metadata(0, 0)
+	player_side_selector.add_item("後手（後攻・盤面反転）")
+	player_side_selector.set_item_metadata(1, 1)
+	player_side_selector.select(0)
+	player_side_selector.item_selected.connect(_on_player_side_changed)
+	side_row.add_child(player_side_selector)
+
+	var sep := HSeparator.new()
+	layout.add_child(sep)
+
+	# デッキ選択行
 	deck_selection_selectors.clear()
-	var sente_selector := _make_deck_selector_row(layout, "先手のデッキ", preferred_first_id)
+	var sente_selector := _make_deck_selector_row(layout, "あなたのデッキ", preferred_first_id)
 	var ordered_ids: Array[String] = DeckLibrary.ordered_deck_ids(deck_library)
 	var preferred_second_id := "deck_2" if ordered_ids.has("deck_2") else preferred_first_id
-	var gote_selector := _make_deck_selector_row(layout, "後手のデッキ", preferred_second_id)
+	var gote_selector := _make_deck_selector_row(layout, "CPUのデッキ", preferred_second_id)
 	deck_selection_selectors = [sente_selector, gote_selector]
 
 	deck_selection_status_label = Label.new()
 	deck_selection_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	deck_selection_status_label.add_theme_font_size_override("font_size", 13)
 	layout.add_child(deck_selection_status_label)
+
 	deck_selection_start_button = Button.new()
-	deck_selection_start_button.text = "このデッキで対局開始"
+	deck_selection_start_button.text = "この設定で対局開始"
 	deck_selection_start_button.custom_minimum_size = Vector2(0, 46)
 	deck_selection_start_button.pressed.connect(_on_match_deck_selection_confirmed)
 	layout.add_child(deck_selection_start_button)
+
+	_set_match_mode(true)
 	_on_match_deck_selection_changed(0)
+
+
+# 対局モード（CPU / ローカル）の表示切り替えを行う
+func _set_match_mode(is_cpu: bool) -> void:
+	is_selected_mode_cpu = is_cpu
+	if is_instance_valid(cpu_settings_container):
+		cpu_settings_container.visible = is_cpu
+
+	var active_color := Color(0.84, 0.65, 0.30)
+	var inactive_color := Color(0.40, 0.45, 0.55)
+
+	if is_instance_valid(match_mode_cpu_button):
+		match_mode_cpu_button.add_theme_color_override("font_color", active_color if is_cpu else inactive_color)
+	if is_instance_valid(match_mode_local_button):
+		match_mode_local_button.add_theme_color_override("font_color", active_color if not is_cpu else inactive_color)
+
+	_update_deck_selector_labels()
+	_on_match_deck_selection_changed(0)
+
+
+# 手番選択変更時のデッキラベル更新
+func _on_player_side_changed(_idx: int) -> void:
+	_update_deck_selector_labels()
+	_on_match_deck_selection_changed(0)
+
+
+# デッキ選択欄のラベル文言を状態に合わせて更新する
+func _update_deck_selector_labels() -> void:
+	if deck_selection_selectors.size() < 2:
+		return
+	var label_0: Label = deck_selection_selectors[0].get_parent().get_child(0) as Label
+	var label_1: Label = deck_selection_selectors[1].get_parent().get_child(0) as Label
+	if label_0 == null or label_1 == null:
+		return
+
+	if is_selected_mode_cpu:
+		var side_val: int = int(player_side_selector.get_item_metadata(player_side_selector.selected))
+		if side_val == 0:
+			label_0.text = "あなたのデッキ"
+			label_1.text = "CPUのデッキ"
+		else:
+			label_0.text = "CPUのデッキ"
+			label_1.text = "あなたのデッキ"
+	else:
+		label_0.text = "先手のデッキ"
+		label_1.text = "後手のデッキ"
 
 
 func _make_deck_selector_row(parent: VBoxContainer, label_text: String, preferred_id: String) -> OptionButton:
@@ -310,6 +440,25 @@ func _on_match_deck_selection_confirmed() -> void:
 			_on_match_deck_selection_changed(0)
 			return
 		selected_profiles.append(profile.duplicate(true))
+
+	# モードと難易度の設定を反映する
+	if is_selected_mode_cpu:
+		is_cpu_match = true
+		if is_instance_valid(cpu_difficulty_selector):
+			cpu_difficulty = str(cpu_difficulty_selector.get_item_metadata(cpu_difficulty_selector.selected))
+		else:
+			cpu_difficulty = "normal"
+
+		if is_instance_valid(player_side_selector):
+			human_player_id = int(player_side_selector.get_item_metadata(player_side_selector.selected))
+		else:
+			human_player_id = 0
+		cpu_player_id = 1 - human_player_id
+	else:
+		is_cpu_match = false
+		human_player_id = 0
+		cpu_player_id = -1
+
 	_initialize_match_from_profiles(selected_profiles)
 	if is_instance_valid(deck_selection_layer):
 		deck_selection_layer.queue_free()
@@ -772,6 +921,14 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 	initialize_promotion_decks()
 	initialize_promotion_dialog()
 	game_initialized = true
+
+	# CPU対局モードの場合はCPUインスタンスを生成する
+	if is_cpu_match:
+		cpu_player_instance = CPUPlayer.new(cpu_player_id, cpu_difficulty, self)
+		print("CPU対局を開始した　難易度: %s, CPU陣営: %s" % [cpu_difficulty, "先手" if cpu_player_id == 0 else "後手"])
+		if current_player == cpu_player_id:
+			_trigger_cpu_turn_if_needed()
+
 	queue_redraw()
 
 
@@ -1087,6 +1244,14 @@ func _update_action_ui() -> void:
 			context_action_button.visible = false
 			return
 
+	# CPU対局時、CPUの手番中は操作ボタンを無効化する
+	if is_cpu_match and current_player == cpu_player_id:
+		end_turn_button.disabled = true
+		end_turn_button.text = "CPU思考中..."
+		cancel_button.disabled = true
+		context_action_button.visible = false
+		return
+
 	# 手番終了ボタンの更新
 	if game_over:
 		end_turn_button.disabled = true
@@ -1206,6 +1371,8 @@ func _show_game_over_dialog() -> void:
 	var is_win: bool = false
 	if P2PNetwork.is_p2p_match:
 		is_win = (winner == P2PNetwork.local_player_id)
+	elif is_cpu_match:
+		is_win = (winner == human_player_id)
 	else:
 		is_win = (winner == 0)
 
@@ -1229,7 +1396,7 @@ func _show_game_over_dialog() -> void:
 	vbox.add_child(win_title)
 
 	var result_lbl := Label.new()
-	if P2PNetwork.is_p2p_match:
+	if P2PNetwork.is_p2p_match or is_cpu_match:
 		result_lbl.text = "あなたの勝利！" if is_win else "あなたの敗北..."
 		result_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50) if is_win else Color(1.0, 0.40, 0.40))
 	else:
@@ -1610,8 +1777,11 @@ func _draw() -> void:
 	var sente_nick_suffix := ""
 	if P2PNetwork.is_p2p_match:
 		var s_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 0 else P2PNetwork.remote_nickname
-		sente_nick_suffix = " [%s]" % s_name
-	var sente_label := "先手%s" % sente_nick_suffix + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 0 else "")
+		sente_nick_suffix = " [%s](あなた)" if P2PNetwork.local_player_id == 0 else " [%s]" % s_name
+	elif is_cpu_match:
+		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
+		sente_nick_suffix = "(あなた)" if human_player_id == 0 else "[CPU(%s)]" % diff_kanji
+	var sente_label := "先手%s" % sente_nick_suffix
 	var sente_main_text := "%s %d" % [sente_label, costs[0]]
 	var sente_rec_text := " (+%d)" % sente_rec
 	var sente_sub_text := "（備蓄%d/%d）" % [reserves[0], MAX_RESERVES]
@@ -1644,8 +1814,11 @@ func _draw() -> void:
 	var gote_nick_suffix := ""
 	if P2PNetwork.is_p2p_match:
 		var g_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 1 else P2PNetwork.remote_nickname
-		gote_nick_suffix = " [%s]" % g_name
-	var gote_label := "後手%s" % gote_nick_suffix + ("(あなた)" if P2PNetwork.is_p2p_match and P2PNetwork.local_player_id == 1 else "")
+		gote_nick_suffix = " [%s](あなた)" if P2PNetwork.local_player_id == 1 else " [%s]" % g_name
+	elif is_cpu_match:
+		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
+		gote_nick_suffix = "(あなた)" if human_player_id == 1 else "[CPU(%s)]" % diff_kanji
+	var gote_label := "後手%s" % gote_nick_suffix
 	var gote_main_text := "%s %d" % [gote_label, costs[1]]
 	var gote_rec_text := " (+%d)" % gote_rec
 	var gote_sub_text := "（備蓄%d/%d）" % [reserves[1], MAX_RESERVES]
@@ -1800,8 +1973,12 @@ func _draw() -> void:
 	# 発動待ちの特殊罠が選択対象にできる敵駒を表示する。
 	_draw_special_trap_target_highlights()
 
-	# 現在表示するプレイヤーの手札を決定する（P2P対局時は常にローカルプレイヤーの手札）
-	var display_player: int = P2PNetwork.local_player_id if P2PNetwork.is_p2p_match else current_player
+	# 現在表示するプレイヤーの手札を決定する（P2P対局時・CPU戦時は常に人間の手札）
+	var display_player: int = current_player
+	if P2PNetwork.is_p2p_match:
+		display_player = P2PNetwork.local_player_id
+	elif is_cpu_match:
+		display_player = human_player_id
 	var current_hand: Array = hands[display_player]
 
 	var hand_title: String = ""
@@ -1819,6 +1996,17 @@ func _draw() -> void:
 				title_color = Color(0.45, 0.90, 0.55)
 		else:
 			hand_title = "あなたの手札（%d/5） - 相手の手番（思考中...）" % current_hand.size()
+			title_color = Color(0.70, 0.73, 0.80)
+	elif is_cpu_match:
+		if current_player == human_player_id:
+			if discard_mode:
+				hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % current_hand.size()
+				title_color = Color(1.0, 0.45, 0.40)
+			else:
+				hand_title = "あなたの手札（%d/5） - あなたの手番" % current_hand.size()
+				title_color = Color(0.45, 0.90, 0.55)
+		else:
+			hand_title = "あなたの手札（%d/5） - CPUの手番（思考中...）" % current_hand.size()
 			title_color = Color(0.70, 0.73, 0.80)
 	elif discard_mode:
 		hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % current_hand.size()
@@ -2239,6 +2427,10 @@ func _complete_end_turn() -> void:
 	draw_card(current_player)
 
 	queue_redraw()
+
+	# CPUの手番になった場合は自動思考を起動する
+	if is_cpu_match and current_player == cpu_player_id and not game_over:
+		_trigger_cpu_turn_if_needed()
 func draw_card(player: int) -> void:
 	if decks[player].is_empty():
 		print("%sの山札は空です。" % ("先手" if player == 0 else "後手"))
@@ -2502,6 +2694,11 @@ func summon_piece(square: Vector2i) -> void:
 
 	hands[current_player].remove_at(selected_hand_index)
 	selected_hand_index = -1
+
+	# CPU対局時は相手の召喚カードをカウンティングに記録する
+	if is_cpu_match and cpu_player_instance != null:
+		if current_player == human_player_id:
+			cpu_player_instance.card_counter.record_card_played(card_name)
 
 	print("%sが%sを召喚しました。" % [
 		"先手" if current_player == 0 else "後手",
@@ -2830,6 +3027,9 @@ func offer_promotion(
 	pending_promotion_card_names = available_names.duplicate()
 	if P2PNetwork.is_p2p_match and current_player != P2PNetwork.local_player_id:
 		print("相手が成りの選択中である")
+		return
+	if is_cpu_match and current_player == cpu_player_id:
+		_handle_cpu_promotion_decision()
 		return
 	promotion_dialog.show_for_piece(str(piece.get("name", "駒")), available_names)
 
@@ -3439,6 +3639,18 @@ func _input(event: InputEvent) -> void:
 		if current_player != P2PNetwork.local_player_id:
 			return
 
+	# CPU対局時の操作権制御
+	if is_cpu_match:
+		# 伏兵・石落としの対象選択待ち
+		if pending_special_trap_waiting_for_target:
+			if pending_special_trap_owner == cpu_player_id:
+				return
+			_handle_pending_special_trap_input(event)
+			return
+		# CPU手番中は入力を無視する
+		if current_player == cpu_player_id:
+			return
+
 	if pending_special_trap_waiting_for_target:
 		_handle_pending_special_trap_input(event)
 		return
@@ -3692,6 +3904,8 @@ func _side_label(player: int) -> String:
 func _is_board_rotated() -> bool:
 	if P2PNetwork.is_p2p_match:
 		return P2PNetwork.local_player_id == 1
+	if is_cpu_match:
+		return human_player_id == 1
 	return shared_test_mode and local_test_player == 1
 
 
@@ -4012,3 +4226,162 @@ func _select_current_hand_by_number(hand_number: int) -> void:
 	selected_square = Vector2i(-1, -1)
 	pending_wall_square = Vector2i(-1, -1)
 	queue_redraw()
+
+
+# ==================================================
+# CPU対局関連の実行制御ロジック
+# ==================================================
+
+# CPUの手番行動を必要に応じて開始する
+func _trigger_cpu_turn_if_needed() -> void:
+	if not is_cpu_match:
+		return
+	if game_over:
+		return
+	if current_player != cpu_player_id:
+		return
+	if is_cpu_thinking:
+		return
+
+	# 特殊罠の対象選択待ちの場合の自動選択
+	if pending_special_trap_waiting_for_target:
+		if pending_special_trap_owner == cpu_player_id:
+			_handle_cpu_special_trap_selection()
+		return
+
+	is_cpu_thinking = true
+	queue_redraw()
+	_run_cpu_action_async()
+
+
+# CPUの思考待機とアクション実行を行う非同期ルーチン
+func _run_cpu_action_async() -> void:
+	# 人間が盤面状況を視認できるよう少しのウェイトを設ける
+	var delay := 0.55 if cpu_difficulty == "easy" else (0.65 if cpu_difficulty == "normal" else 0.75)
+	await get_tree().create_timer(delay).timeout
+
+	if game_over or current_player != cpu_player_id or cpu_player_instance == null:
+		is_cpu_thinking = false
+		queue_redraw()
+		return
+
+	var action: Dictionary = cpu_player_instance.decide_next_action()
+	var action_type := str(action.get("action", "end_turn"))
+
+	match action_type:
+		"summon":
+			var hand_idx: int = int(action.get("hand_index", -1))
+			var target_sq: Vector2i = action.get("square")
+			var pending_sq: Vector2i = action.get("pending_wall_square", Vector2i(-1, -1))
+			selected_hand_index = hand_idx
+			pending_wall_square = pending_sq
+			summon_piece(target_sq)
+			is_cpu_thinking = false
+			queue_redraw()
+			if not game_over and current_player == cpu_player_id:
+				await get_tree().create_timer(0.35).timeout
+				_trigger_cpu_turn_if_needed()
+
+		"move":
+			var from_sq: Vector2i = action.get("from")
+			var to_sq: Vector2i = action.get("to")
+			_execute_cpu_move(from_sq, to_sq)
+			is_cpu_thinking = false
+			queue_redraw()
+			if not game_over and current_player == cpu_player_id:
+				await get_tree().create_timer(0.35).timeout
+				_trigger_cpu_turn_if_needed()
+
+		"discard":
+			var hand_idx: int = int(action.get("hand_index", 0))
+			var cpu_hand: Array = hands[cpu_player_id]
+			if hand_idx >= 0 and hand_idx < cpu_hand.size():
+				var discarded_card: Dictionary = cpu_hand[hand_idx]
+				graveyard.append(discarded_card)
+				cpu_hand.remove_at(hand_idx)
+				print("CPUがカード「%s」を破棄した" % str(discarded_card.get("name", "")))
+				if cpu_hand.size() <= 5:
+					discard_mode = false
+					is_cpu_thinking = false
+					_complete_end_turn()
+				else:
+					is_cpu_thinking = false
+					queue_redraw()
+					await get_tree().create_timer(0.3).timeout
+					_trigger_cpu_turn_if_needed()
+			else:
+				is_cpu_thinking = false
+				discard_mode = false
+				_complete_end_turn()
+
+		"end_turn", _:
+			is_cpu_thinking = false
+			_complete_end_turn()
+			queue_redraw()
+
+
+# CPUの駒移動を安全に実行する
+func _execute_cpu_move(move_from: Vector2i, move_to: Vector2i) -> void:
+	if not pieces.has(move_from):
+		return
+	if not spend_cost(current_player, 1):
+		return
+
+	has_moved_this_turn = true
+	var moving_piece: Dictionary = pieces[move_from].duplicate(true)
+	var triggered_traps: Array[Vector2i] = _get_traps_triggered_by_move(
+		move_from,
+		move_to,
+		moving_piece
+	)
+
+	if _process_traps_before_move(
+		move_from,
+		move_to,
+		moving_piece,
+		triggered_traps,
+		0
+	):
+		return
+
+	_complete_piece_move(move_from, move_to, moving_piece)
+
+
+# 成り確認発生時にCPUが最適な成駒を自動選択する
+func _handle_cpu_promotion_decision() -> void:
+	if pending_promotion_square == Vector2i(-1, -1):
+		return
+
+	if not pending_promotion_card_names.is_empty():
+		# 最も優先度の高い成駒を選択する（龍・馬・と金の順）
+		var chosen: String = pending_promotion_card_names[0]
+		for cand in pending_promotion_card_names:
+			if cand in ["龍", "馬"]:
+				chosen = cand
+				break
+		print("CPUが「%s」への成りを選択した" % chosen)
+		_on_promotion_selected(chosen)
+	else:
+		_on_promotion_declined()
+
+
+# 特殊罠（伏兵・石落とし）発動時にCPUが最も価値の高い敵駒を対象に選ぶ
+func _handle_cpu_special_trap_selection() -> void:
+	if pending_special_trap_candidates.is_empty():
+		_finish_pending_special_trap(Vector2i(-1, -1))
+		return
+
+	var best_sq: Vector2i = pending_special_trap_candidates[0]
+	var max_val: float = -1.0
+
+	for sq in pending_special_trap_candidates:
+		if pieces.has(sq):
+			var p: Dictionary = pieces[sq]
+			var piece_name: String = str(p.get("name", ""))
+			var val: float = float(BoardEvaluator.PIECE_VALUES.get(piece_name, 10))
+			if val > max_val:
+				max_val = val
+				best_sq = sq
+
+	print("CPUが罠の対象としてマス (%d, %d) の駒を選択した" % [best_sq.x, best_sq.y])
+	_finish_pending_special_trap(best_sq)

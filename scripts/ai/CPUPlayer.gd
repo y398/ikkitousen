@@ -303,7 +303,7 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 						]
 						for n_sq in neighbors:
 							if n_sq.x >= 1 and n_sq.x <= 9 and n_sq.y >= 1 and n_sq.y <= 9:
-								if not game_ref.pieces.has(n_sq) and WallRules.can_place_wall_at(game_ref.pieces, sq, player_id):
+								if not game_ref.pieces.has(n_sq) and WallRules.is_valid_wall_square(game_ref.pieces, sq, player_id) and WallRules.is_valid_wall_square(game_ref.pieces, n_sq, player_id):
 									actions.append({
 										"action": "summon",
 										"hand_index": h_idx,
@@ -313,7 +313,7 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 									})
 									break
 					else:
-						if WallRules.can_place_wall_at(game_ref.pieces, sq, player_id):
+						if WallRules.is_valid_wall_square(game_ref.pieces, sq, player_id):
 							actions.append({
 								"action": "summon",
 								"hand_index": h_idx,

@@ -86,7 +86,7 @@ func _build_interface() -> void:
 	spacer.custom_minimum_size.y = 10
 	content_column.add_child(spacer)
 
-	var local_button := _make_menu_button("一人用対局", "既存の対局シーンを開く")
+	var local_button := _make_menu_button("一人用対局", "CPU対戦またはローカル2人対戦を開始する")
 	local_button.pressed.connect(_open_game)
 	content_column.add_child(local_button)
 
@@ -103,7 +103,7 @@ func _build_interface() -> void:
 	content_column.add_child(separator)
 
 	status_label = Label.new()
-	status_label.text = "一人用対局、デッキ構築、ルームマッチを利用できます"
+	status_label.text = "一人用対局（CPU戦/ローカル）、デッキ構築、ルームマッチを利用できます"
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.add_theme_font_size_override("font_size", 13)
