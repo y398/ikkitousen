@@ -1178,6 +1178,8 @@ func _create_action_ui_buttons() -> void:
 func _on_end_turn_button_pressed() -> void:
 	if game_over or discard_mode:
 		return
+	if is_cpu_match and current_player == cpu_player_id:
+		return
 	print("%sが手番を終了しました" % ("先手" if current_player == 0 else "後手"))
 	end_turn()
 
@@ -1213,6 +1215,8 @@ func _on_cancel_button_pressed() -> void:
 
 func _on_action_button_pressed() -> void:
 	if game_over or has_moved_this_turn:
+		return
+	if is_cpu_match and current_player == cpu_player_id:
 		return
 	if selected_square.x < 1 or not pieces.has(selected_square):
 		return
@@ -4368,9 +4372,16 @@ func _run_cpu_action_async() -> void:
 				_complete_end_turn()
 
 		"end_turn", _:
-			is_cpu_thinking = false
-			_complete_end_turn()
-			queue_redraw()
+			if hands[cpu_player_id].size() > 5:
+				discard_mode = true
+				is_cpu_thinking = false
+				queue_redraw()
+				await get_tree().create_timer(0.3).timeout
+				_trigger_cpu_turn_if_needed()
+			else:
+				is_cpu_thinking = false
+				_complete_end_turn()
+				queue_redraw()
 
 
 # CPUの駒移動を安全に実行する

@@ -765,13 +765,26 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 								"pending_wall_square": Vector2i(-1, -1)
 							})
 				else:
+					var card_name_str := str(card.get("name", ""))
+					# 二歩の禁止チェック：同一筋に既に自分の歩が存在する場合は召喚不可とする
+					if category == "兵" and card_name_str == "歩":
+						var has_pawn_in_file := false
+						for existing_sq in game_ref.pieces:
+							var existing_p: Dictionary = game_ref.pieces[existing_sq]
+							if int(existing_p.get("owner", -1)) == player_id and str(existing_p.get("category", "")) == "兵" and str(existing_p.get("name", "")) == "歩":
+								if existing_sq.y == sq.y:
+									has_pawn_in_file = true
+									break
+						if has_pawn_in_file:
+							continue
+
 					if SummonRules.is_in_summon_range(game_ref.pieces, sq, player_id):
 						var err := SummonRules.get_non_wall_placement_error(game_ref.pieces, sq, player_id, category)
 						if err.is_empty():
 							actions.append({
 								"action": "summon",
 								"hand_index": h_idx,
-								"card_name": str(card.get("name", "")),
+								"card_name": card_name_str,
 								"square": sq,
 								"pending_wall_square": Vector2i(-1, -1)
 							})
