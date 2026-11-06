@@ -94,23 +94,66 @@ static func evaluate_board(
 	# 6 リソース（コスト・備蓄・手札、盤上展開を阻害しない適正配点）
 	var resource_score := _calculate_resource_score(evaluating_player, costs, reserves, hands)
 
-	# 総合評価の合算
+	# 局面フェーズ判定（終盤・寄せ合いフェーズかどうかの判定）
+	var is_endgame := _is_endgame_phase(pieces, eval_king_sq, opp_king_sq, evaluating_player, opponent)
+
+	# 総合評価の合算（終盤は駒得や中央支配より王手速度・包囲圧力を最優先する）
+	var w_material := 0.7 if is_endgame else 1.0
+	var w_pressure := 2.2 if is_endgame else 1.1
+	var w_safety := 1.4 if is_endgame else 0.7
+	var w_territory := 0.3 if is_endgame else 0.6
+	var w_frontline := 0.4 if is_endgame else 0.8
+	var w_resource := 0.2 if is_endgame else 0.5
+
 	var total_score: float = (
-		material_score * 1.0
-		+ attack_pressure_score * 1.1
-		+ king_safety_score * 0.7
-		+ territory_score * 0.6
-		+ frontline_score * 0.8
-		+ resource_score * 0.5
+		material_score * w_material
+		+ attack_pressure_score * w_pressure
+		+ king_safety_score * w_safety
+		+ territory_score * w_territory
+		+ frontline_score * w_frontline
+		+ resource_score * w_resource
 	)
 
-	# 王手状態の大幅ボーナス/ペナルティ
+	# 王手状態の大幅ボーナス/ペナルティ（終盤はさらに評価を激増）
+	var check_bonus := 450.0 if is_endgame else 280.0
+	var check_penalty := 500.0 if is_endgame else 350.0
+
 	if CheckRules.is_in_check(pieces, opponent):
-		total_score += 280.0
+		total_score += check_bonus
 	if CheckRules.is_in_check(pieces, evaluating_player):
-		total_score -= 350.0
+		total_score -= check_penalty
 
 	return total_score
+
+
+# 終盤（寄せ合い・詰み争い）フェーズかどうかを判定する
+static func _is_endgame_phase(
+	pieces: Dictionary,
+	eval_king_sq: Vector2i,
+	opp_king_sq: Vector2i,
+	evaluating_player: int,
+	opponent: int
+) -> bool:
+	# いずれかが王手を受けている場合は終盤
+	if CheckRules.is_in_check(pieces, evaluating_player) or CheckRules.is_in_check(pieces, opponent):
+		return true
+
+	# 敵王または自軍王の周囲2マス以内に敵駒が迫っているか判定
+	for sq in pieces:
+		var p: Dictionary = pieces[sq]
+		var owner: int = int(p.get("owner", -1))
+		var cat: String = str(p.get("category", ""))
+		if cat != "兵" and cat != "成":
+			continue
+
+		if owner == evaluating_player:
+			if absi(sq.x - opp_king_sq.x) + absi(sq.y - opp_king_sq.y) <= 2:
+				return true
+		elif owner == opponent:
+			if absi(sq.x - eval_king_sq.x) + absi(sq.y - eval_king_sq.y) <= 2:
+				return true
+
+	return false
 
 
 # 駒の価値合計差を計算する（敵陣への侵入成りを高く評価）
