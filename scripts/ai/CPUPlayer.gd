@@ -118,58 +118,8 @@ func _decide_action_easy() -> Dictionary:
 	return candidate_actions[randi() % candidate_actions.size()]
 
 
-# 中級ルーチン：盤面評価に基づき最善の手を選択する
+# 中級ルーチン：盤面評価に基づき敵王接近・前線押し上げ・タダ取り回避の手を選択する
 func _decide_action_normal() -> Dictionary:
-	var candidate_actions := _generate_all_legal_actions()
-	if candidate_actions.is_empty():
-		return {"action": "end_turn"}
-
-	var best_action: Dictionary = {"action": "end_turn"}
-	var current_eval: float = BoardEvaluator.evaluate_board(
-		game_ref.pieces,
-		player_id,
-		game_ref.costs,
-		game_ref.reserves,
-		game_ref.hands
-	)
-	var best_score: float = current_eval
-
-	# 各行動の仮想スコアを評価する
-	for act in candidate_actions:
-		var sim_pieces: Dictionary = game_ref.pieces.duplicate(true)
-		var sim_costs: Array[int] = [game_ref.costs[0], game_ref.costs[1]]
-		var sim_reserves: Array[int] = [game_ref.reserves[0], game_ref.reserves[1]]
-		var sim_hands: Array = [game_ref.hands[0].duplicate(true), game_ref.hands[1].duplicate(true)]
-
-		var valid := _simulate_action(act, sim_pieces, sim_costs, sim_reserves, sim_hands)
-		if not valid:
-			continue
-
-		var score: float = BoardEvaluator.evaluate_board(
-			sim_pieces,
-			player_id,
-			sim_costs,
-			sim_reserves,
-			sim_hands
-		)
-
-		# 自陣の王が王手される手は評価を下げる
-		if CheckRules.is_in_check(sim_pieces, player_id):
-			score -= 500.0
-
-		if score > best_score:
-			best_score = score
-			best_action = act
-
-	# 有効な行動がなくスコアが上がらない場合はターン終了
-	if best_score <= current_eval and game_ref.costs[player_id] <= 1:
-		return {"action": "end_turn"}
-
-	return best_action
-
-
-# 最強ルーチン：即勝ち判定・大駒損回避・相手の次ターン最大打点を考慮した深い評価
-func _decide_action_hard() -> Dictionary:
 	var candidate_actions := _generate_all_legal_actions()
 	if candidate_actions.is_empty():
 		return {"action": "end_turn"}
@@ -185,27 +135,27 @@ func _decide_action_hard() -> Dictionary:
 				if str(target.get("category", "")) == "王" and int(target.get("owner", -1)) == opponent:
 					return act
 
-	# 2 評価関数と相手の次手反撃を考慮して探索する
 	var best_action: Dictionary = {"action": "end_turn"}
-	var best_score: float = -9999999.0
-
-	# 相手の次ターン最大コストを計算
-	var opp_max_cost := card_counter.calculate_opponent_next_turn_max_cost(
-		game_ref.turn_counts[opponent],
-		game_ref.reserves[opponent]
+	var current_eval: float = BoardEvaluator.evaluate_board(
+		game_ref.pieces,
+		player_id,
+		game_ref.costs,
+		game_ref.reserves,
+		game_ref.hands
 	)
+	var best_score: float = -999999.0
 
 	for act in candidate_actions:
 		var sim_pieces: Dictionary = game_ref.pieces.duplicate(true)
-		var sim_costs: Array[int] = [game_ref.costs[0], game_ref.costs[1]]
-		var sim_reserves: Array[int] = [game_ref.reserves[0], game_ref.reserves[1]]
+		var sim_costs: Array = [game_ref.costs[0], game_ref.costs[1]]
+		var sim_reserves: Array = [game_ref.reserves[0], game_ref.reserves[1]]
 		var sim_hands: Array = [game_ref.hands[0].duplicate(true), game_ref.hands[1].duplicate(true)]
 
-		var valid := _simulate_action(act, sim_pieces, sim_costs, sim_reserves, sim_hands)
+		var valid := _simulate_action(act, sim_pieces, sim_costs, sim_reserves, sim_hands, player_id)
 		if not valid:
 			continue
 
-		var my_eval: float = BoardEvaluator.evaluate_board(
+		var score: float = BoardEvaluator.evaluate_board(
 			sim_pieces,
 			player_id,
 			sim_costs,
@@ -213,36 +163,178 @@ func _decide_action_hard() -> Dictionary:
 			sim_hands
 		)
 
-		# 相手の王に王手をかけている場合は大幅ボーナス
-		if CheckRules.is_in_check(sim_pieces, opponent):
-			my_eval += 250.0
-
-		# 自分が王手されたまま、または自爆する手は完全排除
+		# 自陣の王が王手される手は完全排除
 		if CheckRules.is_in_check(sim_pieces, player_id):
-			my_eval -= 5000.0
+			score -= 5000.0
 
-		# 相手の反撃脅威ペナルティ
-		# 移動先マスが相手の利きに入っている場合、相手がタダ取りできるか確認
+		# 移動先で相手にタダ取りされる手へのペナルティ
 		if act.get("action") == "move":
 			var to_sq: Vector2i = act.get("to")
 			if CheckRules.is_square_attacked(sim_pieces, to_sq, opponent):
-				var piece_name: String = str(sim_pieces[to_sq].get("name", ""))
-				var piece_val: float = float(BoardEvaluator.PIECE_VALUES.get(piece_name, 20))
-				# 守られていないマスへ突入した場合はペナルティ
 				if not CheckRules.is_square_attacked(sim_pieces, to_sq, player_id):
-					my_eval -= piece_val * 1.5
+					var piece_name: String = str(sim_pieces[to_sq].get("name", ""))
+					var piece_val: float = float(BoardEvaluator.PIECE_VALUES.get(piece_name, 20))
+					score -= piece_val * 1.5
 
-		# 相手の残余大駒（飛車など）に対する警戒
-		var threats: Dictionary = card_counter.get_remaining_threat_estimate()
-		if int(threats.get("飛", 0)) > 0 and opp_max_cost >= 3:
-			# 飛車の直撃ライン（縦横）に自軍の王が無防備に晒されているか警戒
-			my_eval -= 20.0
+		if score > best_score:
+			best_score = score
+			best_action = act
 
-		if my_eval > best_score:
-			best_score = my_eval
+	# 現在よりスコアが伸びずコスト備蓄が有利な場合はターン終了
+	if best_score <= current_eval and int(game_ref.costs[player_id]) <= 1:
+		return {"action": "end_turn"}
+
+	return best_action
+
+
+# 最強ルーチン：即勝ち判定・王手包囲・相手の最強反撃を読む2手先Minimax探索
+func _decide_action_hard() -> Dictionary:
+	var candidate_actions := _generate_all_legal_actions()
+	if candidate_actions.is_empty():
+		return {"action": "end_turn"}
+
+	var opponent := 1 - player_id
+
+	# 1 即座に敵の王を取れる手があるか確認する（最優先確定手）
+	for act in candidate_actions:
+		if act.get("action") == "move":
+			var to_sq: Vector2i = act.get("to")
+			if game_ref.pieces.has(to_sq):
+				var target: Dictionary = game_ref.pieces[to_sq]
+				if str(target.get("category", "")) == "王" and int(target.get("owner", -1)) == opponent:
+					return act
+
+	var best_action: Dictionary = {"action": "end_turn"}
+	var best_score: float = -9999999.0
+
+	# 相手の次ターン最大コストを計算
+	var opp_max_cost := card_counter.calculate_opponent_next_turn_max_cost(
+		int(game_ref.turn_counts[opponent]),
+		int(game_ref.reserves[opponent])
+	)
+
+	for act in candidate_actions:
+		var sim_pieces: Dictionary = game_ref.pieces.duplicate(true)
+		var sim_costs: Array = [game_ref.costs[0], game_ref.costs[1]]
+		var sim_reserves: Array = [game_ref.reserves[0], game_ref.reserves[1]]
+		var sim_hands: Array = [game_ref.hands[0].duplicate(true), game_ref.hands[1].duplicate(true)]
+
+		var valid := _simulate_action(act, sim_pieces, sim_costs, sim_reserves, sim_hands, player_id)
+		if not valid:
+			continue
+
+		# 自陣の王が王手される手は完全排除
+		if CheckRules.is_in_check(sim_pieces, player_id):
+			continue
+
+		# 敵王に王手をかけているか
+		var is_checking_opponent: bool = CheckRules.is_in_check(sim_pieces, opponent)
+
+		# 2手先探索: 相手が打ち得る最強の反撃手（Min局面）をシミュレートする
+		var opp_counter_eval := _evaluate_opponent_best_response(
+			sim_pieces,
+			sim_costs,
+			sim_reserves,
+			sim_hands,
+			opponent,
+			opp_max_cost
+		)
+
+		var move_score: float = opp_counter_eval
+
+		# 王手時の大幅ボーナス（詰み探索促進）
+		if is_checking_opponent:
+			move_score += 150.0
+
+		if move_score > best_score:
+			best_score = move_score
 			best_action = act
 
 	return best_action
+
+
+# 相手の最強反撃手（Min局面）を探索し、最悪シナリオ後の評価値を返す
+func _evaluate_opponent_best_response(
+	pieces_after_my_move: Dictionary,
+	costs_state: Array,
+	reserves_state: Array,
+	hands_state: Array,
+	opp: int,
+	opp_max_cost: int
+) -> float:
+	# 相手が直接王を取れるなら即負け評価
+	for sq in pieces_after_my_move:
+		var p: Dictionary = pieces_after_my_move[sq]
+		if int(p.get("owner", -1)) != opp:
+			continue
+		var cat: String = str(p.get("category", ""))
+		if cat != "兵" and cat != "王" and cat != "成":
+			continue
+
+		for my_sq in pieces_after_my_move:
+			var target: Dictionary = pieces_after_my_move[my_sq]
+			if str(target.get("category", "")) == "王" and int(target.get("owner", -1)) == player_id:
+				if MovementRules.can_move_shape(sq, my_sq, p) and not WallRules.blocks_path(pieces_after_my_move, sq, my_sq) and CheckRules._path_is_clear(pieces_after_my_move, sq, my_sq):
+					return -888888.0
+
+	# 相手の代表的な反撃手（駒の捕獲手・王手・大駒前進）を抽出する
+	var opp_replies: Array[Dictionary] = _generate_critical_opponent_replies(pieces_after_my_move, opp, opp_max_cost)
+
+	# 相手に有効な反撃がない場合は現局面の評価値を採用
+	if opp_replies.is_empty():
+		return BoardEvaluator.evaluate_board(pieces_after_my_move, player_id, costs_state, reserves_state, hands_state)
+
+	# 相手の最善手（自分にとって最も評価スコアが低くなる手）を求める
+	var worst_score_for_me: float = 999999.0
+	for r_act in opp_replies:
+		var r_pieces: Dictionary = pieces_after_my_move.duplicate(true)
+		var r_costs: Array = [costs_state[0], costs_state[1]]
+		var r_reserves: Array = [reserves_state[0], reserves_state[1]]
+		var r_hands: Array = [hands_state[0].duplicate(true), hands_state[1].duplicate(true)]
+
+		var ok := _simulate_action(r_act, r_pieces, r_costs, r_reserves, r_hands, opp)
+		if not ok:
+			continue
+
+		var r_eval: float = BoardEvaluator.evaluate_board(r_pieces, player_id, r_costs, r_reserves, r_hands)
+		if r_eval < worst_score_for_me:
+			worst_score_for_me = r_eval
+
+	return worst_score_for_me
+
+
+# 相手の脅威となる主要な反撃手を生成する
+func _generate_critical_opponent_replies(current_pieces: Dictionary, opp: int, opp_cost: int) -> Array[Dictionary]:
+	var replies: Array[Dictionary] = []
+
+	# 1 相手の盤上駒による自軍駒の捕獲手を最優先探索
+	for from_sq in current_pieces:
+		var p: Dictionary = current_pieces[from_sq]
+		if int(p.get("owner", -1)) != opp:
+			continue
+		var cat: String = str(p.get("category", ""))
+		if cat != "兵" and cat != "王" and cat != "成":
+			continue
+
+		for to_sq in current_pieces:
+			var target: Dictionary = current_pieces[to_sq]
+			if int(target.get("owner", -1)) != player_id:
+				continue
+			var target_cat: String = str(target.get("category", ""))
+			if target_cat == "壁":
+				continue
+
+			if MovementRules.can_move_shape(from_sq, to_sq, p) and not WallRules.blocks_path(current_pieces, from_sq, to_sq) and CheckRules._path_is_clear(current_pieces, from_sq, to_sq):
+				replies.append({"action": "move", "from": from_sq, "to": to_sq})
+
+	# 2 相手が飛車などの大駒を召喚して王手・直撃を狙える場合の警戒
+	if replies.size() < 5 and opp_cost >= 3:
+		var threats := card_counter.get_remaining_threat_estimate()
+		if int(threats.get("飛", 0)) > 0:
+			# 飛車の直撃マスを警戒候補に加える
+			replies.append({"action": "threat_rook"})
+
+	return replies
 
 
 # すべての合法手（召喚・駒移動・壁破壊等）を生成する
@@ -251,9 +343,9 @@ func _generate_all_legal_actions() -> Array[Dictionary]:
 	if game_ref == null:
 		return actions
 
-	var current_cost: int = game_ref.costs[player_id]
+	var current_cost: int = int(game_ref.costs[player_id])
 
-	# 1 手札の召喚候補を生成する
+	# 1 手札の召喚候補を生成する（前線近くの有効マスを優先）
 	actions.append_array(_generate_summon_actions(current_cost))
 
 	# 2 盤上の駒移動候補を生成する（コスト1以上が必要、かつ1ターン1回移動制限）
@@ -265,10 +357,18 @@ func _generate_all_legal_actions() -> Array[Dictionary]:
 	return actions
 
 
-# 召喚の合法手を生成する
+# 召喚の合法手を生成する（敵王への接近・前線押し上げを優先して走査）
 func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 	var actions: Array[Dictionary] = []
 	var hand: Array = game_ref.hands[player_id]
+
+	# 敵王の位置を取得する
+	var opp_king_sq := Vector2i(9, 5) if player_id == 1 else Vector2i(1, 5)
+	for sq in game_ref.pieces:
+		var p: Dictionary = game_ref.pieces[sq]
+		if str(p.get("category", "")) == "王" and int(p.get("owner", -1)) != player_id:
+			opp_king_sq = sq
+			break
 
 	for h_idx in range(hand.size()):
 		var card: Dictionary = hand[h_idx]
@@ -289,20 +389,31 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 		if category == "罠" and s_trap != null and bool(s_trap[player_id]):
 			continue
 
-		# 召喚可能なマスを走査する
-		for rank in range(1, 10):
-			for file in range(1, 10):
+		# 最前線から自陣側へ向かって走査する（前線配置を優先）
+		var rank_range: Array = []
+		if player_id == 0:
+			for r in range(1, 10):
+				rank_range.append(r)
+		else:
+			for r in range(9, 0, -1):
+				rank_range.append(r)
+
+		# 筋の走査順を敵王の筋に近い順に並べる
+		var file_range: Array[int] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+		file_range.sort_custom(func(a: int, b: int) -> bool:
+			return absi(a - opp_king_sq.y) < absi(b - opp_king_sq.y)
+		)
+
+		for rank in rank_range:
+			for file in file_range:
 				var sq := Vector2i(rank, file)
 
-				# すでに駒が存在するマスは除外（伏せ罠上や空きマス判定）
 				if game_ref.pieces.has(sq):
 					continue
 
 				if category == "壁":
-					# 馬防柵は2マス配置、竹束は1マス
 					var card_name: String = str(card.get("name", ""))
 					if card_name == "馬防柵":
-						# 隣接する空きマスとペアで配置可能か判定
 						var neighbors: Array[Vector2i] = [
 							Vector2i(rank + 1, file), Vector2i(rank - 1, file),
 							Vector2i(rank, file + 1), Vector2i(rank, file - 1)
@@ -328,7 +439,6 @@ func _generate_summon_actions(current_cost: int) -> Array[Dictionary]:
 								"pending_wall_square": Vector2i(-1, -1)
 							})
 				else:
-					# 兵および罠の召喚可能範囲判定
 					if SummonRules.is_in_summon_range(game_ref.pieces, sq, player_id):
 						var err := SummonRules.get_non_wall_placement_error(game_ref.pieces, sq, player_id, category)
 						if err.is_empty():
@@ -414,9 +524,10 @@ func _generate_move_actions() -> Array[Dictionary]:
 func _simulate_action(
 	act: Dictionary,
 	sim_pieces: Dictionary,
-	sim_costs: Array[int],
-	_sim_reserves: Array[int],
-	sim_hands: Array
+	sim_costs: Array,
+	_sim_reserves: Array,
+	sim_hands: Array,
+	acting_player: int
 ) -> bool:
 	var act_type: String = str(act.get("action", ""))
 
@@ -424,15 +535,15 @@ func _simulate_action(
 		"summon":
 			var h_idx: int = int(act.get("hand_index", -1))
 			var sq: Vector2i = act.get("square")
-			var my_hand: Array = sim_hands[player_id]
+			var my_hand: Array = sim_hands[acting_player]
 			if h_idx < 0 or h_idx >= my_hand.size():
 				return false
 			var card: Dictionary = my_hand[h_idx]
 			var card_cost: int = int(card.get("cost", 1))
-			if sim_costs[player_id] < card_cost:
+			if int(sim_costs[acting_player]) < card_cost:
 				return false
 
-			sim_costs[player_id] -= card_cost
+			sim_costs[acting_player] = int(sim_costs[acting_player]) - card_cost
 			my_hand.remove_at(h_idx)
 
 			# 盤面に駒を配置
@@ -440,7 +551,7 @@ func _simulate_action(
 				"name": str(card.get("name", "")),
 				"category": str(card.get("category", "兵")),
 				"movement_type": str(card.get("movement_type", "pawn")),
-				"owner": player_id
+				"owner": acting_player
 			}
 			return true
 
@@ -449,35 +560,35 @@ func _simulate_action(
 			var to_sq: Vector2i = act.get("to")
 			if not sim_pieces.has(from_sq):
 				return false
-			if sim_costs[player_id] < 1:
+			if int(sim_costs[acting_player]) < 1:
 				return false
 
-			sim_costs[player_id] -= 1
+			sim_costs[acting_player] = int(sim_costs[acting_player]) - 1
 			var moving: Dictionary = sim_pieces[from_sq].duplicate(true)
 			sim_pieces.erase(from_sq)
 
 			# 成り判定（敵陣3段以内に入った場合、成れるなら成る）
 			var forward_rank: int = to_sq.x
-			var is_promotion_zone: bool = (player_id == 0 and forward_rank <= 3) or (player_id == 1 and forward_rank >= 7)
+			var is_promotion_zone: bool = (acting_player == 0 and forward_rank <= 3) or (acting_player == 1 and forward_rank >= 7)
 			if is_promotion_zone and str(moving.get("category", "")) == "兵":
 				moving["category"] = "成"
-				var name: String = str(moving.get("name", ""))
-				if name == "歩":
+				var p_name: String = str(moving.get("name", ""))
+				if p_name == "歩":
 					moving["name"] = "と金"
 					moving["movement_type"] = "gold"
-				elif name == "銀":
+				elif p_name == "銀":
 					moving["name"] = "成銀"
 					moving["movement_type"] = "gold"
-				elif name == "桂":
+				elif p_name == "桂":
 					moving["name"] = "成桂"
 					moving["movement_type"] = "gold"
-				elif name == "香":
+				elif p_name == "香":
 					moving["name"] = "成香"
 					moving["movement_type"] = "gold"
-				elif name == "角":
+				elif p_name == "角":
 					moving["name"] = "馬"
 					moving["movement_type"] = "horse"
-				elif name == "飛":
+				elif p_name == "飛":
 					moving["name"] = "龍"
 					moving["movement_type"] = "dragon"
 
@@ -487,14 +598,17 @@ func _simulate_action(
 				var t_cat := str(target_p.get("category", ""))
 				if t_cat in ["兵", "王"]:
 					var cap_card: Dictionary = target_p.duplicate(true)
-					cap_card["owner"] = player_id
-					sim_hands[player_id].append(cap_card)
+					cap_card["owner"] = acting_player
+					sim_hands[acting_player].append(cap_card)
 
 			sim_pieces[to_sq] = moving
+			return true
+
+		"threat_rook":
+			# 相手の飛車召喚による直撃脅威のシミュレーション
 			return true
 
 		"end_turn":
 			return true
 
 	return false
-
