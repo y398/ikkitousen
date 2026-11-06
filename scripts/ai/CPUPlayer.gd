@@ -7,6 +7,7 @@
 extends RefCounted
 
 const BoardEvaluator = preload("res://scripts/ai/BoardEvaluator.gd")
+const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 const CardCounter = preload("res://scripts/ai/CardCounter.gd")
 const MovementRules = preload("res://scripts/rules/MovementRules.gd")
 const CheckRules = preload("res://scripts/rules/CheckRules.gd")
@@ -28,6 +29,9 @@ const MAX_QUIESCENCE_DEPTH := 2
 var player_id: int = 1
 var difficulty: String = DIFFICULTY_NORMAL
 
+# 評価関数の重みパラメータ（チューニング用）
+var eval_weights: EvalWeights = null
+
 # カードカウンティング管理
 var card_counter: CardCounter
 
@@ -38,12 +42,20 @@ var game_ref: Node = null
 var planned_action_queue: Array = []
 
 
-func _init(p_player_id: int, p_difficulty: String = DIFFICULTY_NORMAL, p_game: Node = null) -> void:
+func _init(p_player_id: int, p_difficulty: String = DIFFICULTY_NORMAL, p_game: Node = null, p_weights: EvalWeights = null) -> void:
 	player_id = p_player_id
 	difficulty = p_difficulty
 	game_ref = p_game
+	eval_weights = p_weights
 	card_counter = CardCounter.new(1 - player_id)
 	planned_action_queue.clear()
+
+
+# 駒の価値を取得する（重みパラメータが設定されている場合は優先反映する）
+func _get_piece_value(piece_name: String, default_val: float = 20.0) -> float:
+	if eval_weights != null and eval_weights.piece_values.has(piece_name):
+		return float(eval_weights.piece_values[piece_name])
+	return float(BoardEvaluator.PIECE_VALUES.get(piece_name, default_val))
 
 
 # 次の最善手を決定する（非同期またはメインループから呼ばれる）
@@ -243,7 +255,8 @@ func _decide_action_normal() -> Dictionary:
 		player_id,
 		game_ref.costs,
 		game_ref.reserves,
-		game_ref.hands
+		game_ref.hands,
+		eval_weights
 	)
 	var best_score: float = -999999.0
 
@@ -266,7 +279,8 @@ func _decide_action_normal() -> Dictionary:
 			player_id,
 			sim_costs,
 			sim_reserves,
-			sim_hands
+			sim_hands,
+			eval_weights
 		)
 
 		# 移動先で相手にタダ取りされる手へのペナルティ
@@ -275,7 +289,7 @@ func _decide_action_normal() -> Dictionary:
 			if CheckRules.is_square_attacked(sim_pieces, to_sq, opponent):
 				if not CheckRules.is_square_attacked(sim_pieces, to_sq, player_id):
 					var piece_name: String = str(sim_pieces[to_sq].get("name", ""))
-					var piece_val: float = float(BoardEvaluator.PIECE_VALUES.get(piece_name, 20))
+					var piece_val: float = _get_piece_value(piece_name, 20.0)
 					score -= piece_val * 1.5
 
 		if score > best_score:
@@ -478,7 +492,8 @@ func _quiescence_search(
 		player_id,
 		costs_state,
 		reserves_state,
-		hands_state
+		hands_state,
+		eval_weights
 	)
 
 	# 深さ制限に達した場合は静止評価値を返す
@@ -989,7 +1004,7 @@ func _simulate_action(
 			for cand in target_candidates:
 				if sim_pieces.has(cand):
 					var p_name := str(sim_pieces[cand].get("name", ""))
-					var v: float = float(BoardEvaluator.PIECE_VALUES.get(p_name, 10))
+					var v: float = _get_piece_value(p_name, 10.0)
 					if v > max_v:
 						max_v = v
 						best_target = cand

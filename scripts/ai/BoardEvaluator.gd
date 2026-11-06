@@ -10,8 +10,9 @@ const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const WallRules = preload("res://scripts/rules/WallRules.gd")
 const SummonRules = preload("res://scripts/rules/SummonRules.gd")
 const AttackRules = preload("res://scripts/rules/AttackRules.gd")
+const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 
-# 駒の基礎価値スコア
+# 駒の基礎価値スコア（互換性維持のための静的デフォルト辞書）
 const PIECE_VALUES: Dictionary = {
 	"王": 100000,
 	"飛": 90,
@@ -51,6 +52,16 @@ const TERRITORY_SQUARES: Array[Vector2i] = [
 	Vector2i(5, 8)  # 2五
 ]
 
+# デフォルトの重みインスタンス（キャッシュ）
+static var _default_weights: EvalWeights = null
+
+
+# デフォルトの重みインスタンスを取得する
+static func get_default_weights() -> EvalWeights:
+	if _default_weights == null:
+		_default_weights = EvalWeights.new()
+	return _default_weights
+
 
 # 指定プレイヤー視点での盤面総合評価値を算出する（プラスが大きいほど有利）
 static func evaluate_board(
@@ -58,8 +69,10 @@ static func evaluate_board(
 	evaluating_player: int,
 	costs: Array,
 	reserves: Array,
-	hands: Array
+	hands: Array,
+	weights: EvalWeights = null
 ) -> float:
+	var w: EvalWeights = weights if weights != null else get_default_weights()
 	var opponent := 1 - evaluating_player
 
 	# 王が取られている場合の即座判定
@@ -84,7 +97,7 @@ static func evaluate_board(
 		return 999999.0
 
 	# 1 駒の価値（マテリアルおよび敵陣浸透ボーナス）
-	var material_score := _calculate_material_score(pieces, evaluating_player)
+	var material_score := _calculate_material_score(pieces, evaluating_player, w)
 
 	# 2 敵王への攻撃圧力と包囲度
 	var attack_pressure_score := _calculate_attack_pressure(pieces, evaluating_player, opponent, eval_king_sq, opp_king_sq)
@@ -102,23 +115,23 @@ static func evaluate_board(
 	var resource_score := _calculate_resource_score(evaluating_player, costs, reserves, hands)
 
 	# 7 領地マス（2五・8五）のインカム支配度（毎ターンコスト+1の戦略価値）
-	var territory_income_score := _calculate_territory_square_control(pieces, evaluating_player)
+	var territory_income_score := _calculate_territory_square_control(pieces, evaluating_player, w)
 
 	# 8 壁による王の防壁効果および大駒射線の遮断
-	var wall_defense_score := _calculate_wall_defense_score(pieces, evaluating_player, eval_king_sq, opponent) - _calculate_wall_defense_score(pieces, opponent, opp_king_sq, evaluating_player)
+	var wall_defense_score := _calculate_wall_defense_score(pieces, evaluating_player, eval_king_sq, opponent, w) - _calculate_wall_defense_score(pieces, opponent, opp_king_sq, evaluating_player, w)
 
 	# 局面フェーズ判定（終盤・寄せ合いフェーズかどうかの判定）
 	var is_endgame := _is_endgame_phase(pieces, eval_king_sq, opp_king_sq, evaluating_player, opponent)
 
 	# 総合評価の合算（終盤は駒得や中央支配より王手速度・包囲圧力を最優先する）
-	var w_material := 0.7 if is_endgame else 1.0
-	var w_pressure := 2.2 if is_endgame else 1.1
-	var w_safety := 1.4 if is_endgame else 0.7
-	var w_territory := 0.3 if is_endgame else 0.6
-	var w_frontline := 0.4 if is_endgame else 0.8
-	var w_resource := 0.2 if is_endgame else 0.5
-	var w_territory_income := 0.3 if is_endgame else 1.0
-	var w_wall := 1.2 if is_endgame else 0.8
+	var w_material: float = w.w_material_endgame if is_endgame else w.w_material_normal
+	var w_pressure: float = w.w_pressure_endgame if is_endgame else w.w_pressure_normal
+	var w_safety: float = w.w_safety_endgame if is_endgame else w.w_safety_normal
+	var w_territory: float = w.w_territory_endgame if is_endgame else w.w_territory_normal
+	var w_frontline: float = w.w_frontline_endgame if is_endgame else w.w_frontline_normal
+	var w_resource: float = w.w_resource_endgame if is_endgame else w.w_resource_normal
+	var w_territory_income: float = w.w_territory_income_endgame if is_endgame else w.w_territory_income_normal
+	var w_wall: float = w.w_wall_endgame if is_endgame else w.w_wall_normal
 
 	var total_score: float = (
 		material_score * w_material
@@ -132,8 +145,8 @@ static func evaluate_board(
 	)
 
 	# 王手状態の大幅ボーナス/ペナルティ（終盤はさらに評価を激増）
-	var check_bonus := 450.0 if is_endgame else 280.0
-	var check_penalty := 500.0 if is_endgame else 350.0
+	var check_bonus: float = w.check_bonus_endgame if is_endgame else w.check_bonus_normal
+	var check_penalty: float = w.check_penalty_endgame if is_endgame else w.check_penalty_normal
 
 	if CheckRules.is_in_check(pieces, opponent):
 		total_score += check_bonus
@@ -156,7 +169,7 @@ static func evaluate_board(
 					else:
 						total_score -= 95000.0
 				else:
-					var target_val: float = float(PIECE_VALUES.get(t_name, 20))
+					var target_val: float = float(w.piece_values.get(t_name, PIECE_VALUES.get(t_name, 20)))
 					if shooter_owner == evaluating_player:
 						total_score += target_val * 1.2
 					else:
@@ -196,7 +209,7 @@ static func _is_endgame_phase(
 
 
 # 駒の価値合計差を計算する（敵陣への侵入成りを高く評価）
-static func _calculate_material_score(pieces: Dictionary, evaluating_player: int) -> float:
+static func _calculate_material_score(pieces: Dictionary, evaluating_player: int, w: EvalWeights) -> float:
 	var score: float = 0.0
 	var opponent := 1 - evaluating_player
 
@@ -204,7 +217,7 @@ static func _calculate_material_score(pieces: Dictionary, evaluating_player: int
 		var p: Dictionary = pieces[sq]
 		var owner: int = int(p.get("owner", -1))
 		var piece_name: String = str(p.get("name", ""))
-		var val: float = float(PIECE_VALUES.get(piece_name, 15))
+		var val: float = float(w.piece_values.get(piece_name, PIECE_VALUES.get(piece_name, 15)))
 
 		# 敵陣に深く侵入している駒への成りと攻撃ボーナス
 		var rank: int = sq.x
@@ -367,7 +380,7 @@ static func _calculate_resource_score(
 
 
 # 領地マス（2五・8五）の占拠および制圧によるインカム利益を計算する
-static func _calculate_territory_square_control(pieces: Dictionary, evaluating_player: int) -> float:
+static func _calculate_territory_square_control(pieces: Dictionary, evaluating_player: int, w: EvalWeights) -> float:
 	var score: float = 0.0
 	var opponent := 1 - evaluating_player
 
@@ -379,23 +392,23 @@ static func _calculate_territory_square_control(pieces: Dictionary, evaluating_p
 			var occ_cat: String = str(occupant.get("category", ""))
 			if occ_cat in ["兵", "成", "王"]:
 				if occ_owner == evaluating_player:
-					score += 45.0
+					score += w.territory_occupy_bonus
 				elif occ_owner == opponent:
-					score -= 50.0
+					score -= w.territory_enemy_penalty
 		else:
 			# 2 空きマスに対する利きの支配度（進入・確保の優勢）
 			var my_attack := CheckRules.is_square_attacked(pieces, t_sq, evaluating_player)
 			var opp_attack := CheckRules.is_square_attacked(pieces, t_sq, opponent)
 			if my_attack and not opp_attack:
-				score += 14.0
+				score += w.territory_attack_control
 			elif opp_attack and not my_attack:
-				score -= 14.0
+				score -= w.territory_attack_control
 
 	return score
 
 
 # 壁による王の防壁効果および敵大駒の射線遮断効果を計算する
-static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_sq: Vector2i, opp: int) -> float:
+static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_sq: Vector2i, opp: int, w: EvalWeights) -> float:
 	if king_sq == Vector2i(-1, -1):
 		return 0.0
 
@@ -408,7 +421,7 @@ static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_
 		if pieces.has(front_sq):
 			var p: Dictionary = pieces[front_sq]
 			if str(p.get("category", "")) == "壁" and int(p.get("owner", -1)) == player:
-				score += 32.0 if step == 1 else 20.0
+				score += w.wall_front_bonus_1 if step == 1 else w.wall_front_bonus_2
 
 	# 2 敵の直線大駒（飛車・香車）と自軍王との間にある壁の射線遮断評価
 	for sq in pieces:
@@ -418,6 +431,6 @@ static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_
 		var m_type: String = str(p.get("movement_type", ""))
 		if m_type in ["rook", "dragon", "lance"] and (sq.x == king_sq.x or sq.y == king_sq.y):
 			if WallRules.blocks_path(pieces, sq, king_sq):
-				score += 28.0
+				score += w.wall_block_ray_bonus
 
 	return score
