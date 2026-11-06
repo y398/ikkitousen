@@ -9,6 +9,7 @@ const MovementRules = preload("res://scripts/rules/MovementRules.gd")
 const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const WallRules = preload("res://scripts/rules/WallRules.gd")
 const SummonRules = preload("res://scripts/rules/SummonRules.gd")
+const AttackRules = preload("res://scripts/rules/AttackRules.gd")
 
 # 駒の基礎価値スコア
 const PIECE_VALUES: Dictionary = {
@@ -122,6 +123,28 @@ static func evaluate_board(
 		total_score += check_bonus
 	if CheckRules.is_in_check(pieces, evaluating_player):
 		total_score -= check_penalty
+
+	# 弓手・成弓の正面2マス射程判定（王への射程直撃は即死・即勝利危機として評価）
+	for sq in pieces:
+		var piece_data: Dictionary = pieces[sq]
+		if AttackRules.is_archer(piece_data):
+			var shooter_owner: int = int(piece_data.get("owner", -1))
+			var target_sq: Vector2i = AttackRules.get_archer_target_square(pieces, sq, shooter_owner)
+			if target_sq.x >= 1 and pieces.has(target_sq):
+				var target_piece: Dictionary = pieces[target_sq]
+				var t_cat: String = str(target_piece.get("category", ""))
+				var t_name: String = str(target_piece.get("name", ""))
+				if t_cat == "王" or t_name == "王":
+					if shooter_owner == evaluating_player:
+						total_score += 90000.0
+					else:
+						total_score -= 95000.0
+				else:
+					var target_val: float = float(PIECE_VALUES.get(t_name, 20))
+					if shooter_owner == evaluating_player:
+						total_score += target_val * 1.2
+					else:
+						total_score -= target_val * 1.3
 
 	return total_score
 

@@ -112,6 +112,21 @@ func _is_action_currently_valid(act: Dictionary) -> bool:
 			return game_ref.can_move(from_sq, to_sq)
 		return true
 
+	if act_type == "archer_attack":
+		if cur_cost < 1:
+			return false
+		var moved_flag = game_ref.get("has_moved_this_turn")
+		if moved_flag != null and bool(moved_flag):
+			return false
+		var archer_sq: Vector2i = act.get("square")
+		if not game_ref.pieces.has(archer_sq):
+			return false
+		var p: Dictionary = game_ref.pieces[archer_sq]
+		if not AttackRules.is_archer(p):
+			return false
+		var target_sq := AttackRules.get_archer_target_square(game_ref.pieces, archer_sq, player_id)
+		return target_sq.x >= 1
+
 	return false
 
 
@@ -183,6 +198,13 @@ func _decide_action_normal() -> Dictionary:
 				var target: Dictionary = game_ref.pieces[to_sq]
 				if str(target.get("category", "")) == "王" and int(target.get("owner", -1)) == opponent:
 					return act
+		elif act.get("action") == "archer_attack":
+			var archer_sq: Vector2i = act.get("square")
+			var t_sq := AttackRules.get_archer_target_square(game_ref.pieces, archer_sq, player_id)
+			if t_sq.x >= 1 and game_ref.pieces.has(t_sq):
+				var target_p: Dictionary = game_ref.pieces[t_sq]
+				if str(target_p.get("category", "")) == "王" and int(target_p.get("owner", -1)) == opponent:
+					return act
 
 	var best_action: Dictionary = {"action": "end_turn"}
 	var current_eval: float = BoardEvaluator.evaluate_board(
@@ -248,6 +270,15 @@ func _decide_action_hard() -> Dictionary:
 			if str(target.get("category", "")) == "王" and int(target.get("owner", -1)) == opponent:
 				return act
 
+	var archer_actions := _generate_archer_actions()
+	for act in archer_actions:
+		var archer_sq: Vector2i = act.get("square")
+		var t_sq := AttackRules.get_archer_target_square(game_ref.pieces, archer_sq, player_id)
+		if t_sq.x >= 1 and game_ref.pieces.has(t_sq):
+			var target_p: Dictionary = game_ref.pieces[t_sq]
+			if str(target_p.get("category", "")) == "王" and int(target_p.get("owner", -1)) == opponent:
+				return act
+
 	# 2 ターン全体の行動プラン候補を列挙する
 	# 【単独移動】【単独召喚】【召喚＋移動】【移動＋召喚】【手番終了】
 	var turn_plans := _generate_turn_plans()
@@ -311,6 +342,7 @@ func _generate_turn_plans() -> Array[Array]:
 
 	var moves := _generate_move_actions()
 	var summons := _generate_summon_actions(cur_cost)
+	var archer_attacks := _generate_archer_actions()
 
 	# プラン1: パス（何もしないで手番終了）
 	plans.append([{"action": "end_turn"}])
@@ -320,11 +352,16 @@ func _generate_turn_plans() -> Array[Array]:
 		for m in moves:
 			plans.append([m, {"action": "end_turn"}])
 
-	# プラン3: 単独召喚
+	# プラン3: 単独弓手遠隔攻撃
+	if cur_cost >= 1:
+		for a in archer_attacks:
+			plans.append([a, {"action": "end_turn"}])
+
+	# プラン4: 単独召喚
 	for s in summons:
 		plans.append([s, {"action": "end_turn"}])
 
-	# プラン4: 召喚 ＋ 移動のコンビネーション（残コスト >= 1）
+	# プラン5: 召喚 ＋ 移動のコンビネーション（残コスト >= 1）
 	for s in summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
@@ -335,7 +372,14 @@ func _generate_turn_plans() -> Array[Array]:
 					continue
 				plans.append([s, m, {"action": "end_turn"}])
 
-	# プラン5: 移動 ＋ 召喚のコンビネーション（移動後に召喚）
+	# プラン6: 召喚 ＋ 弓手攻撃のコンビネーション
+	for s in summons:
+		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
+		if cur_cost - s_cost >= 1:
+			for a in archer_attacks:
+				plans.append([s, a, {"action": "end_turn"}])
+
+	# プラン7: 移動 ＋ 召喚のコンビネーション（移動後に召喚）
 	if cur_cost >= 2:
 		for m in moves:
 			for s in summons:
@@ -446,6 +490,20 @@ func _generate_capture_actions(pieces_state: Dictionary, side: int) -> Array[Dic
 					"to": to_sq
 				})
 
+	# 弓手・成弓による遠隔射撃捕獲
+	for archer_sq in pieces_state:
+		var archer_p: Dictionary = pieces_state[archer_sq]
+		if int(archer_p.get("owner", -1)) != side:
+			continue
+		if AttackRules.is_archer(archer_p):
+			var t_sq := AttackRules.get_archer_target_square(pieces_state, archer_sq, side)
+			if t_sq.x >= 1 and pieces_state.has(t_sq):
+				captures.append({
+					"action": "archer_attack",
+					"square": archer_sq,
+					"target_square": t_sq
+				})
+
 	return captures
 
 
@@ -463,6 +521,39 @@ func _generate_all_legal_actions() -> Array[Dictionary]:
 	var has_moved: bool = moved_flag != null and bool(moved_flag)
 	if current_cost >= 1 and not has_moved:
 		actions.append_array(_generate_move_actions())
+		actions.append_array(_generate_archer_actions())
+
+	return actions
+
+
+# 弓手・成弓による遠隔攻撃の合法手を生成する
+func _generate_archer_actions() -> Array[Dictionary]:
+	var actions: Array[Dictionary] = []
+	if game_ref == null:
+		return actions
+
+	var cur_cost: int = int(game_ref.costs[player_id])
+	var moved_flag = game_ref.get("has_moved_this_turn")
+	var has_moved: bool = moved_flag != null and bool(moved_flag)
+	if cur_cost < 1 or has_moved:
+		return actions
+
+	for sq in game_ref.pieces:
+		var p: Dictionary = game_ref.pieces[sq]
+		if int(p.get("owner", -1)) != player_id:
+			continue
+		if not AttackRules.is_archer(p):
+			continue
+		var attack_cost: int = int(p.get("attack_cost", 1))
+		if cur_cost < attack_cost:
+			continue
+		var target_sq: Vector2i = AttackRules.get_archer_target_square(game_ref.pieces, sq, player_id)
+		if target_sq.x >= 1 and game_ref.pieces.has(target_sq):
+			actions.append({
+				"action": "archer_attack",
+				"square": sq,
+				"target_square": target_sq
+			})
 
 	return actions
 
@@ -700,6 +791,36 @@ func _simulate_action(
 					sim_hands[acting_player].append(cap_card)
 
 			sim_pieces[to_sq] = moving
+			return true
+
+		"archer_attack":
+			var archer_sq: Vector2i = act.get("square")
+			if not sim_pieces.has(archer_sq):
+				return false
+			var archer_p: Dictionary = sim_pieces[archer_sq]
+			var attack_cost: int = int(archer_p.get("attack_cost", 1))
+			if int(sim_costs[acting_player]) < attack_cost:
+				return false
+			var target_sq: Vector2i = AttackRules.get_archer_target_square(sim_pieces, archer_sq, acting_player)
+			if target_sq.x < 1 or not sim_pieces.has(target_sq):
+				return false
+
+			sim_costs[acting_player] = int(sim_costs[acting_player]) - attack_cost
+			var target_p: Dictionary = sim_pieces[target_sq]
+			var t_cat := str(target_p.get("category", ""))
+			var wall_id := int(target_p.get("wall_id", -1))
+
+			if t_cat == "壁" and wall_id >= 1:
+				var wall_sqs: Array[Vector2i] = []
+				for s in sim_pieces:
+					var p_at: Dictionary = sim_pieces[s]
+					if str(p_at.get("category", "")) == "壁" and int(p_at.get("wall_id", -1)) == wall_id:
+						wall_sqs.append(s)
+				for s in wall_sqs:
+					sim_pieces.erase(s)
+			else:
+				sim_pieces.erase(target_sq)
+
 			return true
 
 		"end_turn":

@@ -4292,6 +4292,15 @@ func _run_cpu_action_async() -> void:
 				await get_tree().create_timer(0.35).timeout
 				_trigger_cpu_turn_if_needed()
 
+		"archer_attack":
+			var archer_sq: Vector2i = action.get("square")
+			_execute_cpu_archer_attack(archer_sq)
+			is_cpu_thinking = false
+			queue_redraw()
+			if not game_over and current_player == cpu_player_id:
+				await get_tree().create_timer(0.35).timeout
+				_trigger_cpu_turn_if_needed()
+
 		"discard":
 			var hand_idx: int = int(action.get("hand_index", 0))
 			var cpu_hand: Array = hands[cpu_player_id]
@@ -4349,6 +4358,33 @@ func _execute_cpu_move(move_from: Vector2i, move_to: Vector2i) -> void:
 		return
 
 	_complete_piece_move(move_from, move_to, moving_piece)
+
+
+# CPUの弓手・成弓による遠隔攻撃を実行する
+func _execute_cpu_archer_attack(archer_sq: Vector2i) -> void:
+	if not pieces.has(archer_sq):
+		return
+	var archer: Dictionary = pieces[archer_sq]
+	if int(archer.get("owner", -1)) != current_player:
+		return
+	if not AttackRules.is_archer(archer):
+		return
+	if has_moved_this_turn:
+		return
+
+	var attack_cost := int(archer.get("attack_cost", 1))
+	if not spend_cost(current_player, attack_cost):
+		return
+
+	var target_square := _get_archer_attack_target_square(archer_sq)
+	if target_square.x < 1 or not pieces.has(target_square):
+		return
+	var target_piece: Dictionary = pieces[target_square]
+	if int(target_piece.get("owner", -1)) != 1 - current_player:
+		return
+
+	has_moved_this_turn = true
+	_send_enemy_piece_to_graveyard(target_square, current_player, attack_cost)
 
 
 # 成り確認発生時にCPUが最適な成駒を自動選択する
