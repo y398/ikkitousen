@@ -127,6 +127,25 @@ func _is_action_currently_valid(act: Dictionary) -> bool:
 		var target_sq := AttackRules.get_archer_target_square(game_ref.pieces, archer_sq, player_id)
 		return target_sq.x >= 1
 
+	if act_type == "activate_trap":
+		if cur_cost < 1:
+			return false
+		var moved_flag = game_ref.get("has_moved_this_turn")
+		if moved_flag != null and bool(moved_flag):
+			return false
+		var trap_sq: Vector2i = act.get("square")
+		if not game_ref.pieces.has(trap_sq):
+			return false
+		var p: Dictionary = game_ref.pieces[trap_sq]
+		if str(p.get("category", "")) != "罠":
+			return false
+		var eff_id := TrapRules.get_effect_id(p)
+		if eff_id == "ambush_three_squares":
+			return not TrapRules.get_ambush_target_squares(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1)).is_empty()
+		elif eff_id == "stone_drop_front_two":
+			return TrapRules.find_stone_drop_target(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1)).x >= 1
+		return false
+
 	return false
 
 
@@ -205,6 +224,18 @@ func _decide_action_normal() -> Dictionary:
 				var target_p: Dictionary = game_ref.pieces[t_sq]
 				if str(target_p.get("category", "")) == "王" and int(target_p.get("owner", -1)) == opponent:
 					return act
+		elif act.get("action") == "activate_trap":
+			var trap_sq: Vector2i = act.get("square")
+			var p: Dictionary = game_ref.pieces[trap_sq]
+			var eff_id := TrapRules.get_effect_id(p)
+			if eff_id == "ambush_three_squares":
+				for t_sq in TrapRules.get_ambush_target_squares(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1)):
+					if str(game_ref.pieces[t_sq].get("category", "")) == "王":
+						return act
+			elif eff_id == "stone_drop_front_two":
+				var t_sq := TrapRules.find_stone_drop_target(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1))
+				if t_sq.x >= 1 and str(game_ref.pieces[t_sq].get("category", "")) == "王":
+					return act
 
 	var best_action: Dictionary = {"action": "end_turn"}
 	var current_eval: float = BoardEvaluator.evaluate_board(
@@ -279,6 +310,20 @@ func _decide_action_hard() -> Dictionary:
 			if str(target_p.get("category", "")) == "王" and int(target_p.get("owner", -1)) == opponent:
 				return act
 
+	var trap_actions := _generate_trap_activation_actions()
+	for act in trap_actions:
+		var trap_sq: Vector2i = act.get("square")
+		var p: Dictionary = game_ref.pieces[trap_sq]
+		var eff_id := TrapRules.get_effect_id(p)
+		if eff_id == "ambush_three_squares":
+			for t_sq in TrapRules.get_ambush_target_squares(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1)):
+				if str(game_ref.pieces[t_sq].get("category", "")) == "王":
+					return act
+		elif eff_id == "stone_drop_front_two":
+			var t_sq := TrapRules.find_stone_drop_target(game_ref.pieces, trap_sq, player_id, Vector2i(-1, -1))
+			if t_sq.x >= 1 and str(game_ref.pieces[t_sq].get("category", "")) == "王":
+				return act
+
 	# 2 ターン全体の行動プラン候補を列挙する
 	# 【単独移動】【単独召喚】【召喚＋移動】【移動＋召喚】【手番終了】
 	var turn_plans := _generate_turn_plans()
@@ -343,6 +388,7 @@ func _generate_turn_plans() -> Array[Array]:
 	var moves := _generate_move_actions()
 	var summons := _generate_summon_actions(cur_cost)
 	var archer_attacks := _generate_archer_actions()
+	var trap_activations := _generate_trap_activation_actions()
 
 	# プラン1: パス（何もしないで手番終了）
 	plans.append([{"action": "end_turn"}])
@@ -357,11 +403,16 @@ func _generate_turn_plans() -> Array[Array]:
 		for a in archer_attacks:
 			plans.append([a, {"action": "end_turn"}])
 
-	# プラン4: 単独召喚
+	# プラン4: 単独特殊罠手動起動
+	if cur_cost >= 1:
+		for t in trap_activations:
+			plans.append([t, {"action": "end_turn"}])
+
+	# プラン5: 単独召喚
 	for s in summons:
 		plans.append([s, {"action": "end_turn"}])
 
-	# プラン5: 召喚 ＋ 移動のコンビネーション（残コスト >= 1）
+	# プラン6: 召喚 ＋ 移動のコンビネーション（残コスト >= 1）
 	for s in summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
@@ -372,14 +423,21 @@ func _generate_turn_plans() -> Array[Array]:
 					continue
 				plans.append([s, m, {"action": "end_turn"}])
 
-	# プラン6: 召喚 ＋ 弓手攻撃のコンビネーション
+	# プラン7: 召喚 ＋ 弓手攻撃のコンビネーション
 	for s in summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
 			for a in archer_attacks:
 				plans.append([s, a, {"action": "end_turn"}])
 
-	# プラン7: 移動 ＋ 召喚のコンビネーション（移動後に召喚）
+	# プラン8: 召喚 ＋ 特殊罠起動のコンビネーション
+	for s in summons:
+		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
+		if cur_cost - s_cost >= 1:
+			for t in trap_activations:
+				plans.append([s, t, {"action": "end_turn"}])
+
+	# プラン9: 移動 ＋ 召喚のコンビネーション（移動後に召喚）
 	if cur_cost >= 2:
 		for m in moves:
 			for s in summons:
@@ -504,6 +562,28 @@ func _generate_capture_actions(pieces_state: Dictionary, side: int) -> Array[Dic
 					"target_square": t_sq
 				})
 
+	# 特殊罠の手動起動による捕獲
+	for trap_sq in pieces_state:
+		var trap_p: Dictionary = pieces_state[trap_sq]
+		if int(trap_p.get("owner", -1)) != side:
+			continue
+		if str(trap_p.get("category", "")) == "罠":
+			var eff_id := TrapRules.get_effect_id(trap_p)
+			if eff_id == "ambush_three_squares":
+				if not TrapRules.get_ambush_target_squares(pieces_state, trap_sq, side, Vector2i(-1, -1)).is_empty():
+					captures.append({
+						"action": "activate_trap",
+						"square": trap_sq,
+						"effect_id": eff_id
+					})
+			elif eff_id == "stone_drop_front_two":
+				if TrapRules.find_stone_drop_target(pieces_state, trap_sq, side, Vector2i(-1, -1)).x >= 1:
+					captures.append({
+						"action": "activate_trap",
+						"square": trap_sq,
+						"effect_id": eff_id
+					})
+
 	return captures
 
 
@@ -522,6 +602,51 @@ func _generate_all_legal_actions() -> Array[Dictionary]:
 	if current_cost >= 1 and not has_moved:
 		actions.append_array(_generate_move_actions())
 		actions.append_array(_generate_archer_actions())
+		actions.append_array(_generate_trap_activation_actions())
+
+	return actions
+
+
+# 伏兵・石落としの手動起動（Fキー起動相当）の合法手を生成する
+func _generate_trap_activation_actions() -> Array[Dictionary]:
+	var actions: Array[Dictionary] = []
+	if game_ref == null:
+		return actions
+
+	var cur_cost: int = int(game_ref.costs[player_id])
+	var moved_flag = game_ref.get("has_moved_this_turn")
+	var has_moved: bool = moved_flag != null and bool(moved_flag)
+	if cur_cost < 1 or has_moved:
+		return actions
+
+	for sq in game_ref.pieces:
+		var p: Dictionary = game_ref.pieces[sq]
+		if int(p.get("owner", -1)) != player_id:
+			continue
+		if str(p.get("category", "")) != "罠":
+			continue
+
+		var act_cost := int(p.get("activation_cost", 1))
+		if cur_cost < act_cost:
+			continue
+
+		var effect_id := TrapRules.get_effect_id(p)
+		if effect_id == "ambush_three_squares":
+			var targets := TrapRules.get_ambush_target_squares(game_ref.pieces, sq, player_id, Vector2i(-1, -1))
+			if not targets.is_empty():
+				actions.append({
+					"action": "activate_trap",
+					"square": sq,
+					"effect_id": effect_id
+				})
+		elif effect_id == "stone_drop_front_two":
+			var t_sq := TrapRules.find_stone_drop_target(game_ref.pieces, sq, player_id, Vector2i(-1, -1))
+			if t_sq.x >= 1:
+				actions.append({
+					"action": "activate_trap",
+					"square": sq,
+					"effect_id": effect_id
+				})
 
 	return actions
 
@@ -821,6 +946,42 @@ func _simulate_action(
 			else:
 				sim_pieces.erase(target_sq)
 
+			return true
+
+		"activate_trap":
+			var trap_sq: Vector2i = act.get("square")
+			if not sim_pieces.has(trap_sq):
+				return false
+			var trap_p: Dictionary = sim_pieces[trap_sq]
+			var act_cost := int(trap_p.get("activation_cost", 1))
+			if int(sim_costs[acting_player]) < act_cost:
+				return false
+
+			var eff_id := TrapRules.get_effect_id(trap_p)
+			var target_candidates: Array[Vector2i] = []
+			if eff_id == "ambush_three_squares":
+				target_candidates = TrapRules.get_ambush_target_squares(sim_pieces, trap_sq, acting_player, Vector2i(-1, -1))
+			elif eff_id == "stone_drop_front_two":
+				var t_sq := TrapRules.find_stone_drop_target(sim_pieces, trap_sq, acting_player, Vector2i(-1, -1))
+				if t_sq.x >= 1:
+					target_candidates.append(t_sq)
+
+			if target_candidates.is_empty():
+				return false
+
+			sim_costs[acting_player] = int(sim_costs[acting_player]) - act_cost
+
+			var best_target := target_candidates[0]
+			var max_v := -1.0
+			for cand in target_candidates:
+				if sim_pieces.has(cand):
+					var p_name := str(sim_pieces[cand].get("name", ""))
+					var v: float = float(BoardEvaluator.PIECE_VALUES.get(p_name, 10))
+					if v > max_v:
+						max_v = v
+						best_target = cand
+
+			sim_pieces.erase(best_target)
 			return true
 
 		"end_turn":

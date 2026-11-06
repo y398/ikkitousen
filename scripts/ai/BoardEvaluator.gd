@@ -104,6 +104,9 @@ static func evaluate_board(
 	# 7 領地マス（2五・8五）のインカム支配度（毎ターンコスト+1の戦略価値）
 	var territory_income_score := _calculate_territory_square_control(pieces, evaluating_player)
 
+	# 8 壁による王の防壁効果および大駒射線の遮断
+	var wall_defense_score := _calculate_wall_defense_score(pieces, evaluating_player, eval_king_sq, opponent) - _calculate_wall_defense_score(pieces, opponent, opp_king_sq, evaluating_player)
+
 	# 局面フェーズ判定（終盤・寄せ合いフェーズかどうかの判定）
 	var is_endgame := _is_endgame_phase(pieces, eval_king_sq, opp_king_sq, evaluating_player, opponent)
 
@@ -115,6 +118,7 @@ static func evaluate_board(
 	var w_frontline := 0.4 if is_endgame else 0.8
 	var w_resource := 0.2 if is_endgame else 0.5
 	var w_territory_income := 0.3 if is_endgame else 1.0
+	var w_wall := 1.2 if is_endgame else 0.8
 
 	var total_score: float = (
 		material_score * w_material
@@ -124,6 +128,7 @@ static func evaluate_board(
 		+ frontline_score * w_frontline
 		+ resource_score * w_resource
 		+ territory_income_score * w_territory_income
+		+ wall_defense_score * w_wall
 	)
 
 	# 王手状態の大幅ボーナス/ペナルティ（終盤はさらに評価を激増）
@@ -385,5 +390,34 @@ static func _calculate_territory_square_control(pieces: Dictionary, evaluating_p
 				score += 14.0
 			elif opp_attack and not my_attack:
 				score -= 14.0
+
+	return score
+
+
+# 壁による王の防壁効果および敵大駒の射線遮断効果を計算する
+static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_sq: Vector2i, opp: int) -> float:
+	if king_sq == Vector2i(-1, -1):
+		return 0.0
+
+	var score: float = 0.0
+	var forward_step := -1 if player == 0 else 1
+
+	# 1 王の前方1〜2マスの防壁判定（正面からの王手や突撃を遮断する盾）
+	for step in [1, 2]:
+		var front_sq := Vector2i(king_sq.x + step * forward_step, king_sq.y)
+		if pieces.has(front_sq):
+			var p: Dictionary = pieces[front_sq]
+			if str(p.get("category", "")) == "壁" and int(p.get("owner", -1)) == player:
+				score += 32.0 if step == 1 else 20.0
+
+	# 2 敵の直線大駒（飛車・香車）と自軍王との間にある壁の射線遮断評価
+	for sq in pieces:
+		var p: Dictionary = pieces[sq]
+		if int(p.get("owner", -1)) != opp:
+			continue
+		var m_type: String = str(p.get("movement_type", ""))
+		if m_type in ["rook", "dragon", "lance"] and (sq.x == king_sq.x or sq.y == king_sq.y):
+			if WallRules.blocks_path(pieces, sq, king_sq):
+				score += 28.0
 
 	return score

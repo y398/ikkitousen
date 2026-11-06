@@ -4301,6 +4301,15 @@ func _run_cpu_action_async() -> void:
 				await get_tree().create_timer(0.35).timeout
 				_trigger_cpu_turn_if_needed()
 
+		"activate_trap":
+			var trap_sq: Vector2i = action.get("square")
+			_execute_cpu_trap_activation(trap_sq)
+			is_cpu_thinking = false
+			queue_redraw()
+			if not game_over and current_player == cpu_player_id:
+				await get_tree().create_timer(0.35).timeout
+				_trigger_cpu_turn_if_needed()
+
 		"discard":
 			var hand_idx: int = int(action.get("hand_index", 0))
 			var cpu_hand: Array = hands[cpu_player_id]
@@ -4385,6 +4394,41 @@ func _execute_cpu_archer_attack(archer_sq: Vector2i) -> void:
 
 	has_moved_this_turn = true
 	_send_enemy_piece_to_graveyard(target_square, current_player, attack_cost)
+
+
+# CPUの特殊罠（伏兵・石落とし）の手動起動を実行する
+func _execute_cpu_trap_activation(trap_sq: Vector2i) -> void:
+	if not pieces.has(trap_sq):
+		return
+	var trap_piece: Dictionary = pieces[trap_sq]
+	if str(trap_piece.get("category", "")) != "罠":
+		return
+	if int(trap_piece.get("owner", -1)) != current_player:
+		return
+	var effect_id := _get_trap_effect_id(trap_piece)
+	if not _is_special_trap_effect(effect_id):
+		return
+	if has_moved_this_turn:
+		return
+
+	var act_cost := int(trap_piece.get("activation_cost", 1))
+	if not spend_cost(current_player, act_cost):
+		return
+
+	has_moved_this_turn = true
+	var no_traps: Array[Vector2i] = []
+	_begin_special_trap_activation(
+		trap_sq,
+		trap_piece,
+		false,
+		Vector2i(-1, -1),
+		Vector2i(-1, -1),
+		{},
+		no_traps,
+		0
+	)
+	if pending_special_trap_waiting_for_target:
+		_handle_cpu_special_trap_selection()
 
 
 # 成り確認発生時にCPUが最適な成駒を自動選択する
