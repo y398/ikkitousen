@@ -56,10 +56,19 @@ const TERRITORY_SQUARES: Array[Vector2i] = [
 static var _default_weights: EvalWeights = null
 
 
-# デフォルトの重みインスタンスを取得する
+# デフォルトの重みインスタンスを取得する（保存済み最適パラメータがあれば読み込む）
 static func get_default_weights() -> EvalWeights:
 	if _default_weights == null:
 		_default_weights = EvalWeights.new()
+		var path := "res://data/ai/best_eval_weights.json"
+		if FileAccess.file_exists(path):
+			var file := FileAccess.open(path, FileAccess.READ)
+			if file != null:
+				var json_text := file.get_as_text()
+				file.close()
+				var parsed = JSON.parse_string(json_text)
+				if parsed is Dictionary and parsed.has("weights") and parsed["weights"] is Dictionary:
+					_default_weights.load_from_dict(parsed["weights"])
 	return _default_weights
 
 
