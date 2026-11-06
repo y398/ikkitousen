@@ -4324,6 +4324,10 @@ func _run_cpu_action_async() -> void:
 func _execute_cpu_move(move_from: Vector2i, move_to: Vector2i) -> void:
 	if not pieces.has(move_from):
 		return
+	# 召喚ターン移動制限や壁の捕獲禁止など正規の移動ルールを厳格に適用する
+	if not can_move(move_from, move_to):
+		push_warning("CPUの不正な移動要求をブロックした: %s -> %s" % [str(move_from), str(move_to)])
+		return
 	if not spend_cost(current_player, 1):
 		return
 

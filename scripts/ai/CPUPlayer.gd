@@ -363,23 +363,43 @@ func _generate_move_actions() -> Array[Dictionary]:
 				if to_sq == from_sq:
 					continue
 
-				# 味方の駒があるマスには入れない
-				if game_ref.pieces.has(to_sq):
-					var target: Dictionary = game_ref.pieces[to_sq]
-					if int(target.get("owner", -1)) == player_id:
+				# game_refが正規のcan_move判定を持つ場合はそれを直接呼ぶ（召喚ターン移動制限や壁の捕獲禁止等を完全網羅する）
+				if game_ref.has_method("can_move"):
+					if not game_ref.can_move(from_sq, to_sq):
+						continue
+				else:
+					# フォールバック判定：このターン召喚した兵は移動できない
+					if category == "兵":
+						var summoned_turn: int = int(piece.get("summoned_turn", -1))
+						var turn_cnt = game_ref.get("turn_counts")
+						if turn_cnt != null and summoned_turn == int(turn_cnt[player_id]):
+							continue
+
+					# 移動先に駒が存在する場合のチェック
+					if game_ref.pieces.has(to_sq):
+						var target: Dictionary = game_ref.pieces[to_sq]
+						var target_cat: String = str(target.get("category", ""))
+						# 壁は通常の移動・捕獲では侵入できない
+						if target_cat == "壁":
+							continue
+						# 味方の駒があるマスには入れない
+						if int(target.get("owner", -1)) == player_id:
+							continue
+						# 罠への侵入条件チェック
+						if target_cat == "罠" and not TrapRules.can_enter_trap_square(target, piece):
+							continue
+
+					# 移動形状チェック
+					if not MovementRules.can_move_shape(from_sq, to_sq, piece):
 						continue
 
-				# 移動形状チェック
-				if not MovementRules.can_move_shape(from_sq, to_sq, piece):
-					continue
+					# 壁による進路妨害チェック
+					if WallRules.blocks_path(game_ref.pieces, from_sq, to_sq):
+						continue
 
-				# 壁による進路妨害チェック
-				if WallRules.blocks_path(game_ref.pieces, from_sq, to_sq):
-					continue
-
-				# 直線経路の遮断チェック
-				if not CheckRules._path_is_clear(game_ref.pieces, from_sq, to_sq):
-					continue
+					# 直線経路の遮断チェック
+					if not CheckRules._path_is_clear(game_ref.pieces, from_sq, to_sq):
+						continue
 
 				actions.append({
 					"action": "move",
@@ -460,6 +480,15 @@ func _simulate_action(
 				elif name == "飛":
 					moving["name"] = "龍"
 					moving["movement_type"] = "dragon"
+
+			# 敵駒の捕獲判定（壁や罠は捕獲対象外）
+			if sim_pieces.has(to_sq):
+				var target_p: Dictionary = sim_pieces[to_sq]
+				var t_cat := str(target_p.get("category", ""))
+				if t_cat in ["兵", "王"]:
+					var cap_card: Dictionary = target_p.duplicate(true)
+					cap_card["owner"] = player_id
+					sim_hands[player_id].append(cap_card)
 
 			sim_pieces[to_sq] = moving
 			return true
