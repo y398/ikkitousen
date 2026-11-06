@@ -1184,7 +1184,17 @@ func _on_end_turn_button_pressed() -> void:
 
 func _on_cancel_button_pressed() -> void:
 	if pending_special_trap_waiting_for_target:
-		_finish_pending_special_trap(Vector2i(-1, -1))
+		# 罠の所有者のみが見送りを許可される（被害者側のキャンセルによる無効化を防止する）
+		var can_cancel := false
+		if is_cpu_match and pending_special_trap_owner == human_player_id:
+			can_cancel = true
+		elif P2PNetwork.is_p2p_match and pending_special_trap_owner == P2PNetwork.local_player_id:
+			can_cancel = true
+		elif not is_cpu_match and not P2PNetwork.is_p2p_match and pending_special_trap_owner == current_player:
+			can_cancel = true
+
+		if can_cancel:
+			_finish_pending_special_trap(Vector2i(-1, -1))
 		return
 
 	var had_selection: bool = (
@@ -3418,8 +3428,12 @@ func _begin_special_trap_activation(
 				_finish_pending_special_trap(Vector2i(-1, -1))
 			else:
 				pending_special_trap_waiting_for_target = true
-				print("墓地に送る敵駒をクリックしてください。見送る場合はEscを押してください。")
-				queue_redraw()
+				if is_cpu_match and trap_owner == cpu_player_id:
+					# 罠の所有者がCPUの場合は即座に最善対象を自動選択する
+					_handle_cpu_special_trap_selection()
+				else:
+					print("墓地に送る敵駒をクリックしてください。見送る場合はEscを押してください。")
+					queue_redraw()
 		"single_target":
 			if single_target.x >= 1:
 				_send_piece_to_graveyard(single_target, trap_owner)
@@ -3453,6 +3467,18 @@ func _send_piece_to_graveyard(target_square: Vector2i, trap_owner: int) -> void:
 
 
 func _handle_pending_special_trap_input(event: InputEvent) -> void:
+	# 罠の所有者のみが対象選択および見送りの操作を行える（被害者側の不正操作を防止する）
+	var is_owner := false
+	if is_cpu_match and pending_special_trap_owner == human_player_id:
+		is_owner = true
+	elif P2PNetwork.is_p2p_match and pending_special_trap_owner == P2PNetwork.local_player_id:
+		is_owner = true
+	elif not is_cpu_match and not P2PNetwork.is_p2p_match and pending_special_trap_owner == current_player:
+		is_owner = true
+
+	if not is_owner:
+		return
+
 	if event is InputEventKey:
 		if not event.pressed or event.echo:
 			return
@@ -3531,10 +3557,21 @@ func _finish_pending_special_trap(chosen_square: Vector2i) -> void:
 			queue_redraw()
 			return
 		_complete_piece_move(move_from, move_to, moving_piece)
+		# CPU対局時にCPUの駒が移動して罠処理が完了した場合、CPUの思考を再開する
+		if is_cpu_match and current_player == cpu_player_id and not game_over:
+			is_cpu_thinking = false
+			queue_redraw()
+			await get_tree().create_timer(0.35).timeout
+			_trigger_cpu_turn_if_needed()
 	else:
 		selected_square = Vector2i(-1, -1)
 		selected_hand_index = -1
 		queue_redraw()
+		# 手動起動の場合も、CPUが起動したなら次の手番思考を再開する
+		if is_cpu_match and current_player == cpu_player_id and not game_over:
+			is_cpu_thinking = false
+			await get_tree().create_timer(0.35).timeout
+			_trigger_cpu_turn_if_needed()
 
 func _draw_special_trap_target_highlights() -> void:
 	if not pending_special_trap_waiting_for_target:
@@ -4234,19 +4271,17 @@ func _select_current_hand_by_number(hand_number: int) -> void:
 
 # CPUの手番行動を必要に応じて開始する
 func _trigger_cpu_turn_if_needed() -> void:
-	if not is_cpu_match:
+	if not is_cpu_match or game_over:
 		return
-	if game_over:
+
+	# 特殊罠の対象選択待ちでCPUが罠所有者の場合は手番に関わらず自動選択する
+	if pending_special_trap_waiting_for_target and pending_special_trap_owner == cpu_player_id:
+		_handle_cpu_special_trap_selection()
 		return
+
 	if current_player != cpu_player_id:
 		return
 	if is_cpu_thinking:
-		return
-
-	# 特殊罠の対象選択待ちの場合の自動選択
-	if pending_special_trap_waiting_for_target:
-		if pending_special_trap_owner == cpu_player_id:
-			_handle_cpu_special_trap_selection()
 		return
 
 	is_cpu_thinking = true
