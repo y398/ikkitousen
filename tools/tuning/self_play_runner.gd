@@ -116,3 +116,4 @@ func run_benchmark(num_matches: int = 10) -> Dictionary:
 		file.close()
 
 	return summary
+

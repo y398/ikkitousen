@@ -129,6 +129,9 @@ static func evaluate_board(
 	# 8 壁による王の防壁効果および大駒射線の遮断
 	var wall_defense_score := _calculate_wall_defense_score(pieces, evaluating_player, eval_king_sq, opponent, w) - _calculate_wall_defense_score(pieces, opponent, opp_king_sq, evaluating_player, w)
 
+	# 9 マス別配置評価テーブル（PST）による配置適性評価
+	var pst_score := _calculate_pst_score(pieces, evaluating_player, w)
+
 	# 局面フェーズ判定（終盤・寄せ合いフェーズかどうかの判定）
 	var is_endgame := _is_endgame_phase(pieces, eval_king_sq, opp_king_sq, evaluating_player, opponent)
 
@@ -151,6 +154,7 @@ static func evaluate_board(
 		+ resource_score * w_resource
 		+ territory_income_score * w_territory_income
 		+ wall_defense_score * w_wall
+		+ pst_score
 	)
 
 	# 王手状態の大幅ボーナス/ペナルティ（終盤はさらに評価を激増）
@@ -441,5 +445,27 @@ static func _calculate_wall_defense_score(pieces: Dictionary, player: int, king_
 		if m_type in ["rook", "dragon", "lance"] and (sq.x == king_sq.x or sq.y == king_sq.y):
 			if WallRules.blocks_path(pieces, sq, king_sq):
 				score += w.wall_block_ray_bonus
+
+	return score
+
+
+# 各駒が現在位置しているマスの配置適性スコア（PST）を計算する
+static func _calculate_pst_score(pieces: Dictionary, evaluating_player: int, w: EvalWeights) -> float:
+	if w.pst == null:
+		return 0.0
+
+	var score: float = 0.0
+	var opponent := 1 - evaluating_player
+
+	for sq in pieces:
+		var p: Dictionary = pieces[sq]
+		var owner: int = int(p.get("owner", -1))
+		var piece_name: String = str(p.get("name", ""))
+		var pst_val: float = w.pst.get_score(piece_name, sq, owner)
+
+		if owner == evaluating_player:
+			score += pst_val
+		elif owner == opponent:
+			score -= pst_val
 
 	return score

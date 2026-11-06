@@ -4,3 +4,4 @@
 
 [node name="AutoOptimizer" type="Node"]
 script = ExtResource("1_opt")
+
