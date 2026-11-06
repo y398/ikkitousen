@@ -404,6 +404,10 @@ func _generate_turn_plans() -> Array[Array]:
 	var archer_attacks := _generate_archer_actions()
 	var trap_activations := _generate_trap_activation_actions()
 
+	# コンビネーション探索の計算爆発を防ぐため有望手に枝刈りする
+	var pruned_moves := _prune_promising_moves(moves, 12)
+	var pruned_summons := _prune_promising_summons(summons, 8)
+
 	# プラン1: パス（何もしないで手番終了）
 	plans.append([{"action": "end_turn"}])
 
@@ -427,25 +431,24 @@ func _generate_turn_plans() -> Array[Array]:
 		plans.append([s, {"action": "end_turn"}])
 
 	# プラン6: 召喚 ＋ 移動のコンビネーション（残コスト >= 1）
-	for s in summons:
+	for s in pruned_summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
-			# 召喚後の盤面をシミュレートして移動候補を探索
-			for m in moves:
+			for m in pruned_moves:
 				# 召喚したマスからそのターンは移動不可ルールを遵守
 				if m.get("from") == s.get("square"):
 					continue
 				plans.append([s, m, {"action": "end_turn"}])
 
 	# プラン7: 召喚 ＋ 弓手攻撃のコンビネーション
-	for s in summons:
+	for s in pruned_summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
 			for a in archer_attacks:
 				plans.append([s, a, {"action": "end_turn"}])
 
 	# プラン8: 召喚 ＋ 特殊罠起動のコンビネーション
-	for s in summons:
+	for s in pruned_summons:
 		var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 		if cur_cost - s_cost >= 1:
 			for t in trap_activations:
@@ -453,13 +456,83 @@ func _generate_turn_plans() -> Array[Array]:
 
 	# プラン9: 移動 ＋ 召喚のコンビネーション（移動後に召喚）
 	if cur_cost >= 2:
-		for m in moves:
-			for s in summons:
+		for m in pruned_moves:
+			for s in pruned_summons:
 				var s_cost: int = int(CardDatabase.get_card(str(s.get("card_name", ""))).get("cost", 1))
 				if cur_cost - 1 >= s_cost:
 					plans.append([m, s, {"action": "end_turn"}])
 
 	return plans
+
+
+# コンビネーション用に移動手を優先度順に枝刈りする
+func _prune_promising_moves(moves: Array[Dictionary], max_count: int) -> Array[Dictionary]:
+	if moves.size() <= max_count:
+		return moves
+
+	var opp := 1 - player_id
+	var scored_moves: Array = []
+
+	for m in moves:
+		var to_sq: Vector2i = m.get("to")
+		var score: float = 0.0
+
+		# 敵駒の捕獲は最優先
+		if game_ref.pieces.has(to_sq):
+			var target: Dictionary = game_ref.pieces[to_sq]
+			var t_name: String = str(target.get("name", ""))
+			score += _get_piece_value(t_name, 20.0) * 2.0
+
+		# 敵王への接近ボーナス
+		var opp_king_sq := Vector2i(-1, -1)
+		for sq in game_ref.pieces:
+			var p: Dictionary = game_ref.pieces[sq]
+			if str(p.get("category", "")) == "王" and int(p.get("owner", -1)) == opp:
+				opp_king_sq = sq
+				break
+		if opp_king_sq.x >= 1:
+			var dist: int = absi(to_sq.x - opp_king_sq.x) + absi(to_sq.y - opp_king_sq.y)
+			score += float(18 - dist) * 2.0
+
+		scored_moves.append({"move": m, "score": score})
+
+	scored_moves.sort_custom(func(a, b): return a["score"] > b["score"])
+
+	var result: Array[Dictionary] = []
+	for i in range(mini(max_count, scored_moves.size())):
+		result.append(scored_moves[i]["move"])
+	return result
+
+
+# コンビネーション用に召喚手を優先度順に枝刈りする
+func _prune_promising_summons(summons: Array[Dictionary], max_count: int) -> Array[Dictionary]:
+	if summons.size() <= max_count:
+		return summons
+
+	var scored_summons: Array = []
+	for s in summons:
+		var sq: Vector2i = s.get("square")
+		var card_name: String = str(s.get("card_name", ""))
+		var score: float = _get_piece_value(card_name, 15.0)
+
+		# 前進段（先手なら小さい段数、後手なら大きい段数）を優遇
+		if player_id == 0:
+			score += float(9 - sq.x) * 3.0
+		else:
+			score += float(sq.x) * 3.0
+
+		# 領地マス（2五・8五）への召喚は大幅加点
+		if sq == Vector2i(5, 2) or sq == Vector2i(5, 8):
+			score += 30.0
+
+		scored_summons.append({"summon": s, "score": score})
+
+	scored_summons.sort_custom(func(a, b): return a["score"] > b["score"])
+
+	var result: Array[Dictionary] = []
+	for i in range(mini(max_count, scored_summons.size())):
+		result.append(scored_summons[i]["summon"])
+	return result
 
 
 # 静止探索（Quiescence Search）：駒の取り合いや王手が落ち着くまで探索を延長する
