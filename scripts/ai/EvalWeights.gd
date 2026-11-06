@@ -6,7 +6,7 @@
 extends RefCounted
 class_name EvalWeights
 
-const PieceSquareTables = preload("res://scripts/ai/PieceSquareTables.gd")
+const PieceSquareTablesScript = preload("res://scripts/ai/PieceSquareTables.gd")
 
 # 駒の基準価値（序列崩壊・過学習防止用アンカー）
 const BASE_PIECE_VALUES: Dictionary = {
@@ -109,7 +109,7 @@ var pst: RefCounted = null
 
 
 func _init() -> void:
-	pst = PieceSquareTables.new()
+	pst = PieceSquareTablesScript.new()
 
 
 # ディープコピーを作成する
@@ -247,5 +247,5 @@ func load_from_dict(data: Dictionary) -> void:
 
 	if data.has("pst") and data["pst"] is Dictionary:
 		if pst == null:
-			pst = PieceSquareTables.new()
+			pst = PieceSquareTablesScript.new()
 		pst.load_from_dict(data["pst"])

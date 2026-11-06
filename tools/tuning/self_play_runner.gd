@@ -6,7 +6,6 @@
 extends Node
 
 const HeadlessMatch = preload("res://scripts/ai/HeadlessMatch.gd")
-const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 const CPUPlayer = preload("res://scripts/ai/CPUPlayer.gd")
 
 

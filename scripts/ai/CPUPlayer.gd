@@ -7,7 +7,6 @@
 extends RefCounted
 
 const BoardEvaluator = preload("res://scripts/ai/BoardEvaluator.gd")
-const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 const CardCounter = preload("res://scripts/ai/CardCounter.gd")
 const MovementRules = preload("res://scripts/rules/MovementRules.gd")
 const CheckRules = preload("res://scripts/rules/CheckRules.gd")

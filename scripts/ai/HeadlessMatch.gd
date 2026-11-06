@@ -8,7 +8,6 @@ class_name HeadlessMatch
 
 const BoardEvaluator = preload("res://scripts/ai/BoardEvaluator.gd")
 const CPUPlayer = preload("res://scripts/ai/CPUPlayer.gd")
-const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 const CardDatabase = preload("res://scripts/core/CardDatabase.gd")
 const DeckLibrary = preload("res://scripts/core/DeckLibrary.gd")
 const MovementRules = preload("res://scripts/rules/MovementRules.gd")

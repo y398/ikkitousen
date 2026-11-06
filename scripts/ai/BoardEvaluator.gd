@@ -10,7 +10,6 @@ const CheckRules = preload("res://scripts/rules/CheckRules.gd")
 const WallRules = preload("res://scripts/rules/WallRules.gd")
 const SummonRules = preload("res://scripts/rules/SummonRules.gd")
 const AttackRules = preload("res://scripts/rules/AttackRules.gd")
-const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 
 # 駒の基礎価値スコア（互換性維持のための静的デフォルト辞書）
 const PIECE_VALUES: Dictionary = {

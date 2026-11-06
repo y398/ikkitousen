@@ -6,20 +6,19 @@
 extends Node
 
 const HeadlessMatch = preload("res://scripts/ai/HeadlessMatch.gd")
-const EvalWeights = preload("res://scripts/ai/EvalWeights.gd")
 const CPUPlayer = preload("res://scripts/ai/CPUPlayer.gd")
 const DeckLibrary = preload("res://scripts/core/DeckLibrary.gd")
 
 const SAVE_PATH := "res://data/ai/best_eval_weights.json"
 
-# 自動学習の即座実行フラグ（指示により待機状態とする）
+# 自動学習の即座実行フラグ（インスペクタまたはスクリプトから有効化する）
 @export var auto_start: bool = false
 
 
 func _ready() -> void:
 	if auto_start:
-		print("=== 自己対局パラメータ自動チューニング開始 ===")
-		run_league_optimization(4, 6, 4)
+		print("=== 自己対局パラメータ自動チューニング開始（計200局） ===")
+		run_league_optimization(10, 12, 8)
 	else:
 		print("=== 自己対局オプティマイザー（過学習防止リーグ方式）準備完了 ===")
 		print("対戦学習を開始する場合は run_league_optimization() を呼び出すか auto_start を有効化する")
