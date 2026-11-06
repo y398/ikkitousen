@@ -45,6 +45,12 @@ const CENTER_SQUARES: Array[Vector2i] = [
 	Vector2i(6, 4), Vector2i(6, 5), Vector2i(6, 6)
 ]
 
+# 領地マスの座標一覧（毎ターンコスト+1ボーナスのインカム拠点）
+const TERRITORY_SQUARES: Array[Vector2i] = [
+	Vector2i(5, 2), # 8五
+	Vector2i(5, 8)  # 2五
+]
+
 
 # 指定プレイヤー視点での盤面総合評価値を算出する（プラスが大きいほど有利）
 static func evaluate_board(
@@ -95,6 +101,9 @@ static func evaluate_board(
 	# 6 リソース（コスト・備蓄・手札、盤上展開を阻害しない適正配点）
 	var resource_score := _calculate_resource_score(evaluating_player, costs, reserves, hands)
 
+	# 7 領地マス（2五・8五）のインカム支配度（毎ターンコスト+1の戦略価値）
+	var territory_income_score := _calculate_territory_square_control(pieces, evaluating_player)
+
 	# 局面フェーズ判定（終盤・寄せ合いフェーズかどうかの判定）
 	var is_endgame := _is_endgame_phase(pieces, eval_king_sq, opp_king_sq, evaluating_player, opponent)
 
@@ -105,6 +114,7 @@ static func evaluate_board(
 	var w_territory := 0.3 if is_endgame else 0.6
 	var w_frontline := 0.4 if is_endgame else 0.8
 	var w_resource := 0.2 if is_endgame else 0.5
+	var w_territory_income := 0.3 if is_endgame else 1.0
 
 	var total_score: float = (
 		material_score * w_material
@@ -113,6 +123,7 @@ static func evaluate_board(
 		+ territory_score * w_territory
 		+ frontline_score * w_frontline
 		+ resource_score * w_resource
+		+ territory_income_score * w_territory_income
 	)
 
 	# 王手状態の大幅ボーナス/ペナルティ（終盤はさらに評価を激増）
@@ -348,3 +359,31 @@ static func _calculate_resource_score(
 	var hand_diff: float = (my_hand_size - opp_hand_size)
 
 	return cost_diff * 2.5 + hand_diff * 3.5
+
+
+# 領地マス（2五・8五）の占拠および制圧によるインカム利益を計算する
+static func _calculate_territory_square_control(pieces: Dictionary, evaluating_player: int) -> float:
+	var score: float = 0.0
+	var opponent := 1 - evaluating_player
+
+	for t_sq in TERRITORY_SQUARES:
+		# 1 領地マス自体の占拠（兵・成・王がいれば毎ターンコスト+1インカム）
+		if pieces.has(t_sq):
+			var occupant: Dictionary = pieces[t_sq]
+			var occ_owner: int = int(occupant.get("owner", -1))
+			var occ_cat: String = str(occupant.get("category", ""))
+			if occ_cat in ["兵", "成", "王"]:
+				if occ_owner == evaluating_player:
+					score += 45.0
+				elif occ_owner == opponent:
+					score -= 50.0
+		else:
+			# 2 空きマスに対する利きの支配度（進入・確保の優勢）
+			var my_attack := CheckRules.is_square_attacked(pieces, t_sq, evaluating_player)
+			var opp_attack := CheckRules.is_square_attacked(pieces, t_sq, opponent)
+			if my_attack and not opp_attack:
+				score += 14.0
+			elif opp_attack and not my_attack:
+				score -= 14.0
+
+	return score
