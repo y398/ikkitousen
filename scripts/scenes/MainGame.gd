@@ -69,6 +69,9 @@ var _p2p_opponent_scene_ready: bool = false
 var p2p_overlay_layer: CanvasLayer
 var p2p_overlay_label: Label
 var disconnect_dialog_layer: CanvasLayer
+var reconnect_dialog_layer: CanvasLayer
+var reconnect_timer_label: Label
+var reconnect_update_timer: Timer
 var game_over_dialog_layer: CanvasLayer
 
 # CPU対局関連の制御状態
@@ -191,10 +194,15 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_hide_reconnect_overlay()
 	if P2PNetwork.message_received.is_connected(_on_p2p_message_received):
 		P2PNetwork.message_received.disconnect(_on_p2p_message_received)
 	if P2PNetwork.connection_closed.is_connected(_on_p2p_connection_closed):
 		P2PNetwork.connection_closed.disconnect(_on_p2p_connection_closed)
+	if P2PNetwork.connection_reconnecting.is_connected(_on_p2p_connection_reconnecting):
+		P2PNetwork.connection_reconnecting.disconnect(_on_p2p_connection_reconnecting)
+	if P2PNetwork.connection_reconnected.is_connected(_on_p2p_connection_reconnected):
+		P2PNetwork.connection_reconnected.disconnect(_on_p2p_connection_reconnected)
 
 
 func _create_deck_selection_overlay(preferred_first_id: String) -> void:
@@ -472,6 +480,10 @@ func _initialize_p2p_match() -> void:
 		P2PNetwork.message_received.connect(_on_p2p_message_received)
 	if not P2PNetwork.connection_closed.is_connected(_on_p2p_connection_closed):
 		P2PNetwork.connection_closed.connect(_on_p2p_connection_closed)
+	if not P2PNetwork.connection_reconnecting.is_connected(_on_p2p_connection_reconnecting):
+		P2PNetwork.connection_reconnecting.connect(_on_p2p_connection_reconnecting)
+	if not P2PNetwork.connection_reconnected.is_connected(_on_p2p_connection_reconnected):
+		P2PNetwork.connection_reconnected.connect(_on_p2p_connection_reconnected)
 
 	var startup_players: Array = [
 		P2PNetwork.host_deck_profile.duplicate(true),
@@ -637,11 +649,29 @@ func _execute_remote_move(move_from: Vector2i, move_to: Vector2i) -> void:
 	_complete_piece_move(move_from, move_to, moving_piece)
 
 
-# 通信切断時のハンドラーである
+# 通信の一時切断・再接続待機ハンドラーである
+func _on_p2p_connection_reconnecting(remaining_time: float) -> void:
+	print("対戦相手との通信が一時切断された（再接続待機中: %.1f秒）" % remaining_time)
+	_show_reconnect_overlay(remaining_time)
+	_update_action_ui()
+	queue_redraw()
+
+
+# 通信再接続・復帰時のハンドラーである
+func _on_p2p_connection_reconnected() -> void:
+	print("対戦相手との通信が正常に復帰した")
+	_hide_reconnect_overlay()
+	_update_action_ui()
+	queue_redraw()
+
+
+# 完全切断時のハンドラーである
 func _on_p2p_connection_closed() -> void:
+	_hide_reconnect_overlay()
 	_p2p_disconnected = true
 	print("対戦相手との通信が切断された")
 	_show_disconnect_dialog()
+	_update_action_ui()
 	queue_redraw()
 
 
@@ -779,6 +809,88 @@ func _show_disconnect_dialog() -> void:
 	btn_style.set_corner_radius_all(6)
 	exit_btn.add_theme_stylebox_override("normal", btn_style)
 	vbox.add_child(exit_btn)
+
+
+# 一時切断時の再接続待機オーバーレイを表示する
+func _show_reconnect_overlay(remaining_time: float) -> void:
+	if reconnect_dialog_layer != null:
+		return
+
+	reconnect_dialog_layer = CanvasLayer.new()
+	reconnect_dialog_layer.layer = 190
+	add_child(reconnect_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.85)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	reconnect_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(440, 200)
+	center.add_child(panel)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.10, 0.06, 0.98)
+	style.border_color = Color(0.95, 0.70, 0.20)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	panel.add_child(vbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "通信が一時的に切断されました"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.80, 0.30))
+	vbox.add_child(title_lbl)
+
+	var msg_lbl := Label.new()
+	msg_lbl.text = "対戦相手との通信が不安定になっています\n自動再接続を待機しています..."
+	msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg_lbl.add_theme_font_size_override("font_size", 14)
+	msg_lbl.add_theme_color_override("font_color", Color(0.90, 0.92, 0.96))
+	vbox.add_child(msg_lbl)
+
+	reconnect_timer_label = Label.new()
+	var sec: int = int(ceilf(maxf(remaining_time, 0.0)))
+	reconnect_timer_label.text = "再接続待機中: 残り %d 秒" % sec
+	reconnect_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	reconnect_timer_label.add_theme_font_size_override("font_size", 16)
+	reconnect_timer_label.add_theme_color_override("font_color", Color(1.0, 0.65, 0.25))
+	vbox.add_child(reconnect_timer_label)
+
+	reconnect_update_timer = Timer.new()
+	reconnect_update_timer.wait_time = 0.25
+	reconnect_update_timer.timeout.connect(func():
+		if reconnect_timer_label != null and is_instance_valid(reconnect_timer_label):
+			var cur_sec: int = int(ceilf(maxf(P2PNetwork.reconnect_timer, 0.0)))
+			reconnect_timer_label.text = "再接続待機中: 残り %d 秒" % cur_sec
+	)
+	add_child(reconnect_update_timer)
+	reconnect_update_timer.start()
+
+
+# 再接続待機オーバーレイを非表示にしてリソースを解放する
+func _hide_reconnect_overlay() -> void:
+	if reconnect_update_timer != null:
+		reconnect_update_timer.stop()
+		reconnect_update_timer.queue_free()
+		reconnect_update_timer = null
+	reconnect_timer_label = null
+	if reconnect_dialog_layer != null:
+		reconnect_dialog_layer.queue_free()
+		reconnect_dialog_layer = null
 
 
 
@@ -1251,6 +1363,12 @@ func _update_action_ui() -> void:
 			cancel_button.disabled = true
 			context_action_button.visible = false
 			return
+		elif reconnect_dialog_layer != null:
+			end_turn_button.disabled = true
+			end_turn_button.text = "再接続待機中..."
+			cancel_button.disabled = true
+			context_action_button.visible = false
+			return
 		elif current_player != P2PNetwork.local_player_id and pending_special_trap_mode == "":
 			end_turn_button.disabled = true
 			end_turn_button.text = "相手の手番（思考中...）"
@@ -1329,6 +1447,7 @@ func _update_action_ui() -> void:
 
 
 func _return_to_title() -> void:
+	_hide_reconnect_overlay()
 	if P2PNetwork.is_p2p_match:
 		P2PNetwork.close_connection()
 
@@ -2003,6 +2122,9 @@ func _draw() -> void:
 		if _p2p_disconnected:
 			hand_title = "通信が切断されました　タイトルに戻ってください"
 			title_color = Color(1.0, 0.35, 0.35)
+		elif reconnect_dialog_layer != null:
+			hand_title = "一時切断中　再接続を待機しています..."
+			title_color = Color(1.0, 0.70, 0.20)
 		elif current_player == P2PNetwork.local_player_id:
 			if discard_mode:
 				hand_title = "手札超過：破棄するカードをクリックしてください（%d枚）" % current_hand.size()
@@ -3670,7 +3792,7 @@ func _input(event: InputEvent) -> void:
 
 	# P2P対局時の操作権制御
 	if P2PNetwork.is_p2p_match:
-		if _p2p_disconnected or p2p_overlay_layer != null or disconnect_dialog_layer != null:
+		if _p2p_disconnected or p2p_overlay_layer != null or disconnect_dialog_layer != null or reconnect_dialog_layer != null:
 			return
 		# 伏兵・石落としの対象選択待ち
 		if pending_special_trap_waiting_for_target:

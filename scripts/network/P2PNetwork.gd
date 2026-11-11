@@ -8,11 +8,16 @@ extends Node
 signal session_code_ready(role_type: String, code: String)
 signal connection_established
 signal connection_closed
+signal connection_reconnecting(remaining_time: float)
+signal connection_reconnected
 signal message_received(message: Dictionary)
 signal log_updated(text: String)
 signal connection_error(error_message: String)
 
 const STUN_SERVER := "stun:stun.l.google.com:19302"
+
+# 一時切断時の再接続待機猶予秒数（ターン制対戦向けの安全時間である）
+const RECONNECT_GRACE_PERIOD: float = 8.0
 
 enum Role {
 	NONE,
@@ -30,6 +35,10 @@ var is_collecting_candidates: bool = false
 var local_session_type: String = ""
 var local_sdp: String = ""
 var is_connected_peer: bool = false
+
+# 再接続待機状態の管理フラグおよび残り秒数タイマー
+var is_reconnecting: bool = false
+var reconnect_timer: float = 0.0
 
 # 対局セッション同期用プロパティ
 var is_p2p_match: bool = false
@@ -49,21 +58,56 @@ func _ready() -> void:
 	add_child(candidate_collection_timer)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if peer != null:
 		peer.poll()
 		if is_connected_peer:
 			var conn_state := peer.get_connection_state()
-			if conn_state == WebRTCPeerConnection.STATE_DISCONNECTED or conn_state == WebRTCPeerConnection.STATE_FAILED or conn_state == WebRTCPeerConnection.STATE_CLOSED:
+
+			# 一時切断（DISCONNECTEDまたはFAILED）の検知と猶予タイマー処理
+			if conn_state == WebRTCPeerConnection.STATE_DISCONNECTED or conn_state == WebRTCPeerConnection.STATE_FAILED:
+				if not is_reconnecting:
+					is_reconnecting = true
+					reconnect_timer = RECONNECT_GRACE_PERIOD
+					log_updated.emit("P2P接続が一時切断された（再接続待機中: %.1f秒）" % reconnect_timer)
+					connection_reconnecting.emit(reconnect_timer)
+				else:
+					reconnect_timer -= delta
+					if reconnect_timer <= 0.0:
+						is_connected_peer = false
+						is_reconnecting = false
+						reconnect_timer = 0.0
+						log_updated.emit("再接続タイムアウト: P2P接続が切断された")
+						connection_closed.emit()
+
+			# 明示的な切断（CLOSED）時は即時切断とする
+			elif conn_state == WebRTCPeerConnection.STATE_CLOSED:
 				is_connected_peer = false
-				log_updated.emit("P2P接続が切断された")
+				is_reconnecting = false
+				reconnect_timer = 0.0
+				log_updated.emit("P2P接続が終了された")
 				connection_closed.emit()
+
+			# 再接続待機中に接続状態がCONNECTEDに復帰した場合
+			elif is_reconnecting and conn_state == WebRTCPeerConnection.STATE_CONNECTED:
+				if data_channel != null and data_channel.get_ready_state() == WebRTCDataChannel.STATE_OPEN:
+					is_reconnecting = false
+					reconnect_timer = 0.0
+					log_updated.emit("P2P接続が正常に復帰した")
+					connection_reconnected.emit()
 
 	if data_channel != null and data_channel.get_ready_state() == WebRTCDataChannel.STATE_OPEN:
 		if not is_connected_peer:
 			is_connected_peer = true
 			log_updated.emit("P2P接続が確立された")
 			connection_established.emit()
+		elif is_reconnecting:
+			# DataChannelが開いておりpeerがCONNECTEDであれば復帰とする
+			if peer != null and peer.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED:
+				is_reconnecting = false
+				reconnect_timer = 0.0
+				log_updated.emit("P2P接続（データチャンネル）が復帰した")
+				connection_reconnected.emit()
 
 		while data_channel.get_available_packet_count() > 0:
 			var packet := data_channel.get_packet()
@@ -74,10 +118,11 @@ func _process(_delta: float) -> void:
 			else:
 				log_updated.emit("受信パケットのJSONパースに失敗した: " + json_string)
 	elif is_connected_peer:
-		if data_channel == null or data_channel.get_ready_state() == WebRTCDataChannel.STATE_CLOSED:
-			is_connected_peer = false
-			log_updated.emit("P2P接続が切断された")
-			connection_closed.emit()
+		if not is_reconnecting:
+			if data_channel == null or data_channel.get_ready_state() == WebRTCDataChannel.STATE_CLOSED:
+				is_connected_peer = false
+				log_updated.emit("P2P接続が切断された")
+				connection_closed.emit()
 
 
 # ホストとして初期化し、Offerコードの生成を開始する
@@ -244,6 +289,8 @@ func close_connection() -> void:
 
 func _cleanup() -> void:
 	is_connected_peer = false
+	is_reconnecting = false
+	reconnect_timer = 0.0
 	is_collecting_candidates = false
 	if candidate_collection_timer != null:
 		candidate_collection_timer.stop()
