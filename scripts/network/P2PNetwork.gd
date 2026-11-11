@@ -205,40 +205,99 @@ func _on_ice_candidate_created(media: String, index: int, candidate_name: String
 		candidate_collection_timer.start(0.5)
 
 
+# セッション情報（SDPおよびCandidates）を圧縮してBase64接続コードを生成する
+func encode_session_payload(session_type: String, sdp: String, candidates: Array) -> String:
+	var payload := {
+		"t": session_type,
+		"s": sdp,
+		"c": []
+	}
+	for cand in candidates:
+		if cand is Dictionary:
+			payload["c"].append({
+				"m": cand.get("m", cand.get("media", "")),
+				"i": cand.get("i", cand.get("index", 0)),
+				"n": cand.get("n", cand.get("name", ""))
+			})
+
+	var json_text := JSON.stringify(payload)
+	var raw_bytes := json_text.to_utf8_buffer()
+	var compressed := raw_bytes.compress(FileAccess.COMPRESSION_DEFLATE)
+	return "Z1:" + Marshalls.raw_to_base64(compressed)
+
+
+# 接続コード（圧縮または旧非圧縮形式）を解析してセッション辞書を復元する
+func decode_session_code(code_text: String) -> Dictionary:
+	var clean_code := code_text.strip_edges()
+	if clean_code.is_empty():
+		return {"ok": false, "error": "接続コードが空である"}
+
+	var json_text := ""
+	if clean_code.begins_with("Z1:"):
+		var raw_base64 := clean_code.substr(3)
+		var compressed_bytes := Marshalls.base64_to_raw(raw_base64)
+		if compressed_bytes.is_empty():
+			return {"ok": false, "error": "Base64デコードに失敗した"}
+		var decompressed := compressed_bytes.decompress_dynamic(1024 * 1024, FileAccess.COMPRESSION_DEFLATE)
+		if decompressed.is_empty():
+			decompressed = compressed_bytes.decompress(65536, FileAccess.COMPRESSION_DEFLATE)
+		if decompressed.is_empty():
+			return {"ok": false, "error": "接続コードの解凍に失敗した"}
+		json_text = decompressed.get_string_from_utf8()
+	else:
+		# 旧形式（非圧縮Base64）との互換性
+		json_text = Marshalls.base64_to_utf8(clean_code)
+
+	var parsed: Variant = JSON.parse_string(json_text)
+	if not (parsed is Dictionary):
+		return {"ok": false, "error": "JSONパースに失敗した"}
+
+	var payload: Dictionary = parsed
+	var type: String = str(payload.get("t", payload.get("type", "")))
+	var sdp: String = str(payload.get("s", payload.get("sdp", "")))
+	var raw_candidates: Variant = payload.get("c", payload.get("candidates", []))
+
+	if type.is_empty() or sdp.is_empty():
+		return {"ok": false, "error": "必要な情報（type/sdp）が含まれていない"}
+
+	var normalized_candidates: Array[Dictionary] = []
+	if raw_candidates is Array:
+		for c_var in raw_candidates:
+			if c_var is Dictionary:
+				normalized_candidates.append({
+					"media": str(c_var.get("m", c_var.get("media", ""))),
+					"index": int(c_var.get("i", c_var.get("index", 0))),
+					"name": str(c_var.get("n", c_var.get("name", "")))
+				})
+
+	return {
+		"ok": true,
+		"type": type,
+		"sdp": sdp,
+		"candidates": normalized_candidates
+	}
+
+
 func _on_candidate_collection_timeout() -> void:
 	is_collecting_candidates = false
-	var payload := {
-		"type": local_session_type,
-		"sdp": local_sdp,
-		"candidates": local_candidates
-	}
-	var json_text := JSON.stringify(payload)
-	var base64_code := Marshalls.utf8_to_base64(json_text)
-	log_updated.emit("%sコードの生成が完了した" % ("オファー" if local_session_type == "offer" else "アンサー"))
-	session_code_ready.emit(local_session_type, base64_code)
+	var compressed_code := encode_session_payload(local_session_type, local_sdp, local_candidates)
+	log_updated.emit("%sコードの生成が完了した（圧縮コード長: %d文字）" % [
+		"オファー" if local_session_type == "offer" else "アンサー",
+		compressed_code.length()
+	])
+	session_code_ready.emit(local_session_type, compressed_code)
 
 
 # 相手から受け取った接続コードを読み込んで適用する
 func apply_remote_code(code_text: String) -> bool:
-	var clean_code := code_text.strip_edges()
-	if clean_code.is_empty():
-		connection_error.emit("接続コードが空である")
+	var decoded := decode_session_code(code_text)
+	if not bool(decoded.get("ok", false)):
+		connection_error.emit(str(decoded.get("error", "接続コードの解析に失敗した")))
 		return false
 
-	var json_text := Marshalls.base64_to_utf8(clean_code)
-	var parsed: Variant = JSON.parse_string(json_text)
-	if not (parsed is Dictionary):
-		connection_error.emit("接続コードの解析に失敗した（不正な形式）")
-		return false
-
-	var payload: Dictionary = parsed
-	var type: String = str(payload.get("type", ""))
-	var sdp: String = str(payload.get("sdp", ""))
-	var raw_candidates: Variant = payload.get("candidates", [])
-
-	if type.is_empty() or sdp.is_empty():
-		connection_error.emit("接続コードに必要な情報（type/sdp）が含まれていない")
-		return false
+	var type: String = str(decoded["type"])
+	var sdp: String = str(decoded["sdp"])
+	var candidates: Array = decoded["candidates"]
 
 	var error: Error = peer.set_remote_description(type, sdp)
 	if error != OK:
@@ -254,14 +313,12 @@ func apply_remote_code(code_text: String) -> bool:
 		log_updated.emit("オファーを適用し、アンサーを生成中である")
 
 	# 相手側のCandidateを反映する
-	if raw_candidates is Array:
-		for candidate_variant in raw_candidates:
-			if candidate_variant is Dictionary:
-				var c: Dictionary = candidate_variant
-				var media: String = str(c.get("media", ""))
-				var index: int = int(c.get("index", 0))
-				var c_name: String = str(c.get("name", ""))
-				peer.add_ice_candidate(media, index, c_name)
+	for c in candidates:
+		if c is Dictionary:
+			var media: String = str(c.get("media", ""))
+			var index: int = int(c.get("index", 0))
+			var c_name: String = str(c.get("name", ""))
+			peer.add_ice_candidate(media, index, c_name)
 
 	log_updated.emit("%sコードを正常に適用した" % ("オファー" if type == "offer" else "アンサー"))
 	return true
