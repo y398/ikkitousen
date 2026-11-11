@@ -1791,7 +1791,8 @@ func _draw() -> void:
 	var sente_nick_suffix := ""
 	if P2PNetwork.is_p2p_match:
 		var s_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 0 else P2PNetwork.remote_nickname
-		sente_nick_suffix = " [%s](あなた)" if P2PNetwork.local_player_id == 0 else " [%s]" % s_name
+		var s_fmt := " [%s](あなた)" if P2PNetwork.local_player_id == 0 else " [%s]"
+		sente_nick_suffix = s_fmt % s_name
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
 		sente_nick_suffix = "(あなた)" if human_player_id == 0 else "[CPU(%s)]" % diff_kanji
@@ -1828,7 +1829,8 @@ func _draw() -> void:
 	var gote_nick_suffix := ""
 	if P2PNetwork.is_p2p_match:
 		var g_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 1 else P2PNetwork.remote_nickname
-		gote_nick_suffix = " [%s](あなた)" if P2PNetwork.local_player_id == 1 else " [%s]" % g_name
+		var g_fmt := " [%s](あなた)" if P2PNetwork.local_player_id == 1 else " [%s]"
+		gote_nick_suffix = g_fmt % g_name
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
 		gote_nick_suffix = "(あなた)" if human_player_id == 1 else "[CPU(%s)]" % diff_kanji
