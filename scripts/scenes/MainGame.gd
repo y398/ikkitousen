@@ -60,6 +60,17 @@ var action_ui_layer: CanvasLayer
 var end_turn_button: Button
 var cancel_button: Button
 var context_action_button: Button
+var help_button: Button
+var promotion_deck_button: Button
+
+# UIダイアログおよび情報表示レイヤー
+var help_dialog_layer: CanvasLayer
+var promotion_deck_dialog_layer: CanvasLayer
+
+# 対局ログ（直近の行動履歴）および直前移動マス
+var battle_logs: Array[Dictionary] = []
+var last_move_from: Vector2i = Vector2i(-1, -1)
+var last_move_to: Vector2i = Vector2i(-1, -1)
 
 # P2P通信対局用の同期フラグ
 var _is_remote_action: bool = false
@@ -931,6 +942,9 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 	pending_special_trap_moving_piece.clear()
 	pending_special_trap_triggered_traps.clear()
 	pending_special_trap_next_index = 0
+	battle_logs.clear()
+	last_move_from = Vector2i(-1, -1)
+	last_move_to = Vector2i(-1, -1)
 	var sente_promotion_names: Array = startup_players[0]["promotion_deck"]
 	var gote_promotion_names: Array = startup_players[1]["promotion_deck"]
 	active_promotion_deck_names_by_player = [
@@ -943,7 +957,8 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 		"category": "王",
 		"name": "王",
 		"movement_type": "king",
-		"owner": 0
+		"owner": 0,
+		"original_owner": 0
 	}
 
 	# 後手の王
@@ -951,7 +966,8 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 		"category": "王",
 		"name": "王",
 		"movement_type": "king",
-		"owner": 1
+		"owner": 1,
+		"original_owner": 1
 	}
 
 	# 動作確認用の駒
@@ -1022,6 +1038,8 @@ func _initialize_match_from_profiles(startup_players: Array) -> void:
 				continue
 			card["name"] = str(card_name)
 			card["owner"] = player
+			card["original_owner"] = player
+			card["is_captured"] = false
 			decks[player].append(card)
 		decks[player].shuffle()
 
@@ -1286,6 +1304,253 @@ func _create_action_ui_buttons() -> void:
 	context_action_button.pressed.connect(_on_action_button_pressed)
 	action_ui_layer.add_child(context_action_button)
 
+	# 4. 成デッキ確認ボタン
+	promotion_deck_button = Button.new()
+	promotion_deck_button.text = "成デッキ確認"
+	promotion_deck_button.tooltip_text = "双方の成デッキの残りカードを確認する"
+	promotion_deck_button.custom_minimum_size = Vector2(130, 46)
+	promotion_deck_button.focus_mode = Control.FOCUS_NONE
+	promotion_deck_button.add_theme_font_size_override("font_size", 14)
+	promotion_deck_button.offset_left = 604.0
+	promotion_deck_button.offset_top = 580.0
+	promotion_deck_button.offset_right = 734.0
+	promotion_deck_button.offset_bottom = 626.0
+
+	var promo_btn_style := StyleBoxFlat.new()
+	promo_btn_style.bg_color = Color(0.12, 0.16, 0.24)
+	promo_btn_style.border_color = Color(0.70, 0.58, 0.32)
+	promo_btn_style.set_border_width_all(1)
+	promo_btn_style.set_corner_radius_all(6)
+	promotion_deck_button.add_theme_stylebox_override("normal", promo_btn_style)
+
+	var promo_btn_hover := StyleBoxFlat.new()
+	promo_btn_hover.bg_color = Color(0.18, 0.24, 0.35)
+	promo_btn_hover.border_color = Color(0.95, 0.80, 0.45)
+	promo_btn_hover.set_border_width_all(2)
+	promo_btn_hover.set_corner_radius_all(6)
+	promotion_deck_button.add_theme_stylebox_override("hover", promo_btn_hover)
+
+	promotion_deck_button.pressed.connect(_show_promotion_deck_dialog)
+	action_ui_layer.add_child(promotion_deck_button)
+
+	# 5. 操作ヘルプボタン
+	help_button = Button.new()
+	help_button.text = "操作ヘルプ (?)"
+	help_button.tooltip_text = "操作方法およびゲームルールを確認する"
+	help_button.custom_minimum_size = Vector2(120, 46)
+	help_button.focus_mode = Control.FOCUS_NONE
+	help_button.add_theme_font_size_override("font_size", 14)
+	help_button.offset_left = 744.0
+	help_button.offset_top = 580.0
+	help_button.offset_right = 864.0
+	help_button.offset_bottom = 626.0
+
+	var help_btn_style := StyleBoxFlat.new()
+	help_btn_style.bg_color = Color(0.13, 0.15, 0.20)
+	help_btn_style.border_color = Color(0.45, 0.52, 0.65)
+	help_btn_style.set_border_width_all(1)
+	help_btn_style.set_corner_radius_all(6)
+	help_button.add_theme_stylebox_override("normal", help_btn_style)
+
+	var help_btn_hover := StyleBoxFlat.new()
+	help_btn_hover.bg_color = Color(0.19, 0.22, 0.30)
+	help_btn_hover.border_color = Color(0.70, 0.78, 0.95)
+	help_btn_hover.set_border_width_all(2)
+	help_btn_hover.set_corner_radius_all(6)
+	help_button.add_theme_stylebox_override("hover", help_btn_hover)
+
+	help_button.pressed.connect(_show_help_dialog)
+	action_ui_layer.add_child(help_button)
+
+
+# 成デッキ確認モーダルダイアログを表示する
+func _show_promotion_deck_dialog() -> void:
+	if promotion_deck_dialog_layer != null:
+		return
+
+	promotion_deck_dialog_layer = CanvasLayer.new()
+	promotion_deck_dialog_layer.layer = 180
+	add_child(promotion_deck_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.82)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed:
+			_hide_promotion_deck_dialog()
+	)
+	promotion_deck_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(520, 360)
+	center.add_child(panel)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.09, 0.12, 0.18, 0.98)
+	style.border_color = Color(0.84, 0.68, 0.35)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "成デッキ状況"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(0.95, 0.80, 0.45))
+	vbox.add_child(title)
+
+	var local_player: int = P2PNetwork.local_player_id if P2PNetwork.is_p2p_match else human_player_id
+	var opp_player: int = 1 - local_player
+
+	# あなたの成デッキ
+	var my_box := VBoxContainer.new()
+	my_box.add_theme_constant_override("separation", 6)
+	vbox.add_child(my_box)
+
+	var my_title := Label.new()
+	var my_cards: Array = promotion_decks[local_player]
+	my_title.text = "【あなたの成デッキ（残り %d 枚）】" % my_cards.size()
+	my_title.add_theme_font_size_override("font_size", 15)
+	my_title.add_theme_color_override("font_color", Color(0.40, 0.85, 1.0))
+	my_box.add_child(my_title)
+
+	var my_names: Array[String] = []
+	for c in my_cards:
+		my_names.append(str(c.get("name", "?")))
+	var my_content := Label.new()
+	my_content.text = "、".join(my_names) if not my_names.is_empty() else "（成デッキの残りカードはありません）"
+	my_content.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	my_content.add_theme_font_size_override("font_size", 14)
+	my_content.add_theme_color_override("font_color", Color(0.85, 0.90, 0.96))
+	my_box.add_child(my_content)
+
+	# 相手の成デッキ
+	var opp_box := VBoxContainer.new()
+	opp_box.add_theme_constant_override("separation", 6)
+	vbox.add_child(opp_box)
+
+	var opp_title := Label.new()
+	var opp_cards: Array = promotion_decks[opp_player]
+	opp_title.text = "【相手の成デッキ（残り %d 枚）】" % opp_cards.size()
+	opp_title.add_theme_font_size_override("font_size", 15)
+	opp_title.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45))
+	opp_box.add_child(opp_title)
+
+	var opp_names: Array[String] = []
+	for c in opp_cards:
+		opp_names.append(str(c.get("name", "?")))
+	var opp_content := Label.new()
+	opp_content.text = "、".join(opp_names) if not opp_names.is_empty() else "（成デッキの残りカードはありません）"
+	opp_content.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	opp_content.add_theme_font_size_override("font_size", 14)
+	opp_content.add_theme_color_override("font_color", Color(0.85, 0.90, 0.96))
+	opp_box.add_child(opp_content)
+
+	# 閉じるボタン
+	var close_btn := Button.new()
+	close_btn.text = "閉じる (Esc)"
+	close_btn.custom_minimum_size = Vector2(160, 40)
+	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	close_btn.pressed.connect(_hide_promotion_deck_dialog)
+	vbox.add_child(close_btn)
+
+
+func _hide_promotion_deck_dialog() -> void:
+	if promotion_deck_dialog_layer != null:
+		promotion_deck_dialog_layer.queue_free()
+		promotion_deck_dialog_layer = null
+
+
+# 操作ヘルプモーダルダイアログを表示する
+func _show_help_dialog() -> void:
+	if help_dialog_layer != null:
+		return
+
+	help_dialog_layer = CanvasLayer.new()
+	help_dialog_layer.layer = 180
+	add_child(help_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.82)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed:
+			_hide_help_dialog()
+	)
+	help_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(580, 440)
+	center.add_child(panel)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.09, 0.12, 0.18, 0.98)
+	style.border_color = Color(0.40, 0.70, 1.0)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(24)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "操作方法・対戦ガイド"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(0.40, 0.85, 1.0))
+	vbox.add_child(title)
+
+	var help_text := Label.new()
+	help_text.text = """【基本操作】
+・カード選択／召喚：手札をクリックして選択後、盤面の薄青マスをクリック
+・駒の移動：自分の駒をクリックして選択後、移動可能マスをクリック
+・手番終了：画面右下の「手番終了」ボタン または [Space] キー
+・選択解除：画面右下の「選択解除」ボタン または [Esc] キー
+・文脈アクション：弓手選択時の攻撃 [A] キー、特殊罠選択時の起動 [F] キー
+
+【駒の捕獲とスリーブ（裏面）】
+・相手の駒を捕獲すると、自分の手札に加わり再利用できます
+・アナログTCG同様、相手の手札の裏面（スリーブ）を見ることで、奪われた自陣の駒が含まれているか確認できます（自陣スリーブ色のカードが相手の手札に表示されます）
+
+【勝利条件】
+・相手の「王」を捕獲するか、遠隔攻撃で討ち取ると勝利となります"""
+	help_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help_text.add_theme_font_size_override("font_size", 13)
+	help_text.add_theme_color_override("font_color", Color(0.90, 0.93, 0.98))
+	vbox.add_child(help_text)
+
+	var close_btn := Button.new()
+	close_btn.text = "閉じる (Esc)"
+	close_btn.custom_minimum_size = Vector2(160, 40)
+	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	close_btn.pressed.connect(_hide_help_dialog)
+	vbox.add_child(close_btn)
+
+
+func _hide_help_dialog() -> void:
+	if help_dialog_layer != null:
+		help_dialog_layer.queue_free()
+		help_dialog_layer = null
+
 
 func _on_end_turn_button_pressed() -> void:
 	if game_over or discard_mode:
@@ -1293,7 +1558,21 @@ func _on_end_turn_button_pressed() -> void:
 	if is_cpu_match and current_player == cpu_player_id:
 		return
 	print("%sが手番を終了しました" % ("先手" if current_player == 0 else "後手"))
+	_add_battle_log("手番を終了した", current_player)
 	end_turn()
+
+
+# 対局操作ログに行動履歴を追加する
+func _add_battle_log(text: String, player: int = -1) -> void:
+	var p: int = current_player if player == -1 else player
+	battle_logs.append({
+		"player": p,
+		"text": text,
+		"turn": turn_counts[0] + turn_counts[1] + 1
+	})
+	if battle_logs.size() > 40:
+		battle_logs.remove_at(0)
+	queue_redraw()
 
 
 func _on_cancel_button_pressed() -> void:
@@ -1808,12 +2087,13 @@ func _get_piece_display_label(piece: Dictionary) -> String:
 func _draw_shogi_piece(center: Vector2, piece_owner: int, border_color: Color, label: String) -> void:
 	var bottom_player: int = 1 if _is_board_rotated() else 0
 	var forward_sign: float = -1.0 if piece_owner == bottom_player else 1.0
+	# 本物の将棋駒のプロポーション（底辺が最も広く、上部に向かってすぼまり屋根型に尖る五角形）
 	var points := PackedVector2Array([
 		center + Vector2(0.0, 22.0 * forward_sign),
-		center + Vector2(20.0, 5.0 * forward_sign),
-		center + Vector2(16.0, -22.0 * forward_sign),
-		center + Vector2(-16.0, -22.0 * forward_sign),
-		center + Vector2(-20.0, 5.0 * forward_sign)
+		center + Vector2(16.0, 11.0 * forward_sign),
+		center + Vector2(19.0, -20.0 * forward_sign),
+		center + Vector2(-19.0, -20.0 * forward_sign),
+		center + Vector2(-16.0, 11.0 * forward_sign)
 	])
 	var fill_color: Color = Color(0.91, 0.84, 0.68)
 	if piece_owner == 1:
@@ -1826,10 +2106,11 @@ func _draw_shogi_piece(center: Vector2, piece_owner: int, border_color: Color, l
 	outline_points.append(points[0])
 	draw_polyline(outline_points, border_color, 2.5, true)
 
-	# 文字は両陣営とも読みやすい向きのまま中央に表示する。
+	# 文字は両陣営とも読みやすい向きのまま中央に表示する
+	var text_y_offset: float = 3.0 - (2.0 * forward_sign)
 	draw_string(
 		JP_FONT,
-		Vector2(center.x - 20.0, center.y + 5.0),
+		Vector2(center.x - 20.0, center.y + text_y_offset),
 		label,
 		HORIZONTAL_ALIGNMENT_CENTER,
 		40.0,
@@ -1880,15 +2161,18 @@ func _draw() -> void:
 			Color(1.0, 0.35, 0.35)
 		)
 
-	# 山札・コスト情報
+	# 山札・手札枚数情報
+	var deck_and_hand_text := "山札：先手 %d枚 / 後手 %d枚    手札：先手 %d枚 / 後手 %d枚" % [
+		decks[0].size(), decks[1].size(),
+		hands[0].size(), hands[1].size()
+	]
 	draw_string(
 		JP_FONT,
 		Vector2(340, 45),
-		"山札：先手 %d枚 / 後手 %d枚"
-		% [decks[0].size(), decks[1].size()],
+		deck_and_hand_text,
 		HORIZONTAL_ALIGNMENT_LEFT,
-		450,
-		35,
+		600,
+		24,
 		Color(0.90, 0.93, 0.98)
 	)
 
@@ -2004,8 +2288,11 @@ func _draw() -> void:
 				draw_rect(rect, zone_tint, true)
 			draw_rect(rect, Color(0.28, 0.31, 0.36), false, 1.0)
 
-	# 領地（2五・8五）を明示する。
+	# 領地（2五・8五）を明示する
 	_draw_territory_markers()
+
+	# 直前に駒が移動したマスをハイライト表示する
+	_draw_last_move_highlights()
 
 	# 筋の番号（盤面反転時は左右も反転する）
 	var is_rotated := _is_board_rotated()
@@ -2155,6 +2442,9 @@ func _draw() -> void:
 			current_hand.size()
 		]
 
+	# 相手の手札（枚数・裏面スリーブ）を描画する
+	_draw_opponent_hand()
+
 	draw_string(
 		JP_FONT,
 		Vector2(604, 135),
@@ -2242,7 +2532,10 @@ func _draw() -> void:
 					false,
 					4.0 if is_selected else 2.0
 				)
-	
+
+				# 捕獲した駒（元は相手の駒）には金色の奪取バッジを表示する
+				_draw_captured_badge_if_needed(card, card_rect, display_player)
+
 				# 画像カードでは、従来の文字描画をスキップ
 				continue
 	
@@ -2343,44 +2636,201 @@ func _draw() -> void:
 				14,
 				Color(0.27, 0.30, 0.36)
 			)
-	# 両プレイヤーの成デッキ
-	draw_string(
-		JP_FONT,
-		Vector2(604, 535),
-		"先手の成デッキ：" + promotion_deck_summary(0),
-		HORIZONTAL_ALIGNMENT_LEFT,
-		260,
-		14,
-		Color(0.90, 0.93, 0.98)
-	)
 
-	draw_string(
-		JP_FONT,
-		Vector2(604, 558),
-		"後手の成デッキ：" + promotion_deck_summary(1),
-		HORIZONTAL_ALIGNMENT_LEFT,
-		260,
-		14,
-		Color(0.90, 0.93, 0.98)
-	)
+			# 捕獲した駒（元は相手の駒）には金色の奪取バッジを表示する
+			_draw_captured_badge_if_needed(card, card_rect, display_player)
 
-	draw_string(
-		JP_FONT,
-		Vector2(604, 592),
-		"操作ガイド",
-		HORIZONTAL_ALIGNMENT_LEFT,
-		-1,
-		16,
-		Color(0.95, 0.97, 1.0)
-	)
-
-	if shared_test_mode:
-		draw_string(JP_FONT, Vector2(604, 614), "数字キー：手札選択 / F2：成デッキ出力", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
-	else:
-		draw_string(JP_FONT, Vector2(604, 614), "タップ／クリック：手札選択・駒移動・召喚", HORIZONTAL_ALIGNMENT_LEFT, 260, 13, Color(0.82, 0.86, 0.92))
+	# 直近の対局操作ログパネルを描画する（成デッキや操作ガイドは下部ボタンから確認可能）
+	_draw_battle_log_panel()
 
 	_update_action_ui()
-	
+
+
+# 直前に駒が移動したマス（移動元・移動先）を薄い枠と塗りで明示する
+func _draw_last_move_highlights() -> void:
+	if last_move_from.x >= 1 and last_move_from.y >= 1:
+		var from_rect := square_rect(last_move_from)
+		draw_rect(from_rect, Color(0.95, 0.85, 0.35, 0.16), true)
+		draw_rect(from_rect, Color(0.95, 0.85, 0.35, 0.50), false, 2.0)
+	if last_move_to.x >= 1 and last_move_to.y >= 1:
+		var to_rect := square_rect(last_move_to)
+		draw_rect(to_rect, Color(0.95, 0.85, 0.35, 0.28), true)
+		draw_rect(to_rect, Color(1.0, 0.90, 0.40, 0.80), false, 2.5)
+
+
+# 相手の手札枚数と裏面カード（スリーブ）を描画する
+func _draw_opponent_hand() -> void:
+	var local_player: int = current_player
+	if P2PNetwork.is_p2p_match:
+		local_player = P2PNetwork.local_player_id
+	elif is_cpu_match:
+		local_player = human_player_id
+	var opp_player: int = 1 - local_player
+	var opp_hand: Array = hands[opp_player]
+
+	# 相手の手札ラベル
+	var opp_label := "相手の手札"
+	if is_cpu_match:
+		opp_label = "CPUの手札"
+	elif P2PNetwork.is_p2p_match:
+		var opp_name := P2PNetwork.remote_nickname if P2PNetwork.remote_nickname != "" else "相手"
+		opp_label = "%sの手札" % opp_name
+	else:
+		opp_label = "後手の手札" if local_player == 0 else "先手の手札"
+
+	var title_text := "%s（%d/5枚）" % [opp_label, opp_hand.size()]
+	draw_string(
+		JP_FONT,
+		Vector2(604, 30),
+		title_text,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		15,
+		Color(0.85, 0.88, 0.95)
+	)
+
+	# 相手の手札カード（裏面スリーブ）を並べる
+	var card_w: float = 46.0
+	var card_h: float = 64.0
+	var gap: float = 8.0
+	var start_x: float = 604.0
+	var start_y: float = 38.0
+
+	for i in range(opp_hand.size()):
+		var c_rect := Rect2(start_x + i * (card_w + gap), start_y, card_w, card_h)
+		var c_card: Dictionary = opp_hand[i]
+		var orig_owner: int = int(c_card.get("original_owner", opp_player))
+		var is_my_piece: bool = (orig_owner == local_player)
+		_draw_sleeve_card(c_rect, orig_owner, is_my_piece)
+
+
+# スリーブ（カード裏面）を描画する（元々の所有者によって先手スリーブ・後手スリーブで色分けする）
+func _draw_sleeve_card(rect: Rect2, original_owner: int, is_local_player_piece: bool) -> void:
+	# 先手スリーブ: 藍色・紺碧、後手スリーブ: 深紅・茜色
+	var bg_color := Color(0.12, 0.20, 0.42) if original_owner == 0 else Color(0.52, 0.14, 0.18)
+	var border_color := Color(0.85, 0.72, 0.35)
+	if is_local_player_piece:
+		border_color = Color(1.0, 0.88, 0.20)
+
+	# スリーブ本体
+	draw_rect(rect, bg_color, true)
+
+	# 装飾用の内枠
+	var inner_rect := Rect2(rect.position + Vector2(3, 3), rect.size - Vector2(6, 6))
+	draw_rect(inner_rect, Color(bg_color.r * 1.25, bg_color.g * 1.25, bg_color.b * 1.25), true)
+	draw_rect(inner_rect, Color(border_color.r, border_color.g, border_color.b, 0.45), false, 1.0)
+
+	# スリーブ外枠
+	draw_rect(rect, border_color, false, 2.0 if not is_local_player_piece else 2.5)
+
+	# スリーブ中央の紋様（将または自）
+	var mark_text := "将"
+	var mark_color := Color(border_color.r, border_color.g, border_color.b, 0.70)
+	if is_local_player_piece:
+		mark_text = "自"
+		mark_color = Color(1.0, 0.95, 0.40)
+	draw_string(
+		JP_FONT,
+		rect.position + Vector2(rect.size.x * 0.5 - 7, rect.size.y * 0.5 + 6),
+		mark_text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		-1,
+		14,
+		mark_color
+	)
+
+	# 相手の手札内に自陣の駒がある場合は「自陣駒」バッジを付与する
+	if is_local_player_piece:
+		var badge_rect := Rect2(rect.position + Vector2(1, rect.size.y - 15), Vector2(rect.size.x - 2, 14))
+		draw_rect(badge_rect, Color(0.85, 0.65, 0.10, 0.9), true)
+		draw_string(
+			JP_FONT,
+			badge_rect.position + Vector2(0, 11),
+			"自陣駒",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			badge_rect.size.x,
+			10,
+			Color(0.1, 0.1, 0.1)
+		)
+
+
+# 捕獲した駒（奪取した駒）である場合に金色の奪取バッジを描画する
+func _draw_captured_badge_if_needed(card: Dictionary, card_rect: Rect2, display_player: int) -> void:
+	var is_captured_card: bool = bool(card.get("is_captured", false)) or (card.has("original_owner") and int(card.get("original_owner", display_player)) != display_player)
+	if not is_captured_card:
+		return
+
+	var badge_w: float = 38.0
+	var badge_h: float = 18.0
+	var badge_pos := Vector2(card_rect.position.x + card_rect.size.x - badge_w - 4, card_rect.position.y + 4)
+	var badge_rect := Rect2(badge_pos, Vector2(badge_w, badge_h))
+
+	draw_rect(badge_rect, Color(0.92, 0.74, 0.20), true)
+	draw_rect(badge_rect, Color(0.35, 0.25, 0.05), false, 1.0)
+	draw_string(
+		JP_FONT,
+		badge_pos + Vector2(0, 14),
+		"奪取",
+		HORIZONTAL_ALIGNMENT_CENTER,
+		badge_w,
+		11,
+		Color(0.12, 0.10, 0.05)
+	)
+
+
+# 直近の対局操作ログを画面右下のパネルに描画する
+func _draw_battle_log_panel() -> void:
+	var panel_rect := Rect2(Vector2(604, 496), Vector2(260, 72))
+	# 背景
+	draw_rect(panel_rect, Color(0.08, 0.10, 0.15, 0.85), true)
+	draw_rect(panel_rect, Color(0.28, 0.34, 0.45, 0.70), false, 1.0)
+
+	# ヘッダー
+	draw_string(
+		JP_FONT,
+		Vector2(612, 510),
+		"対局ログ",
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		12,
+		Color(0.75, 0.82, 0.95)
+	)
+
+	if battle_logs.is_empty():
+		draw_string(
+			JP_FONT,
+			Vector2(612, 532),
+			"行動履歴はありません",
+			HORIZONTAL_ALIGNMENT_LEFT,
+			240,
+			11,
+			Color(0.55, 0.60, 0.70)
+		)
+		return
+
+	# 直近3件のログを表示する
+	var log_count: int = mini(battle_logs.size(), 3)
+	var line_y: float = 528.0
+	var start_idx: int = battle_logs.size() - log_count
+	for i in range(start_idx, battle_logs.size()):
+		var entry: Dictionary = battle_logs[i]
+		var player_id: int = int(entry.get("player", 0))
+		var log_text: String = str(entry.get("text", ""))
+		var p_name: String = "先手: " if player_id == 0 else "後手: "
+		var line_color: Color = Color(0.45, 0.75, 1.0) if player_id == 0 else Color(1.0, 0.55, 0.50)
+
+		draw_string(
+			JP_FONT,
+			Vector2(612, line_y),
+			p_name + log_text,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			244,
+			11,
+			line_color
+		)
+		line_y += 16.0
+
+
 func square_rect(square: Vector2i) -> Rect2:
 	var col: int
 	var row: int
@@ -2539,6 +2989,9 @@ func _complete_end_turn() -> void:
 		_send_p2p_action({
 			"action": "end_turn"
 		})
+
+	# 手番終了を対局ログに記録する
+	_add_battle_log("手番終了", current_player)
 
 	discard_mode = false
 
@@ -2798,6 +3251,7 @@ func summon_piece(square: Vector2i) -> void:
 		"trap_effect": trap_effect_id,
 		"activation_cost": int(card.get("activation_cost", 0)),
 		"attack_cost": int(card.get("attack_cost", 0)),
+		"original_owner": int(card.get("original_owner", current_player)),
 		"on_summon_effect": str(card.get("on_summon_effect", "")),
 		"effect_text": str(card.get("effect_text", "")),
 		"is_face_down": category == "罠"
@@ -2832,6 +3286,7 @@ func summon_piece(square: Vector2i) -> void:
 
 	hands[current_player].remove_at(selected_hand_index)
 	selected_hand_index = -1
+	_add_battle_log("%s を (%d, %d) に召喚" % [card_name, square.y, square.x], current_player)
 
 	# CPU対局時は相手の召喚カードをカウンティングに記録する
 	if is_cpu_match and cpu_player_instance != null:
@@ -3441,6 +3896,7 @@ func _send_enemy_piece_to_graveyard(target_square: Vector2i, attacker: int, paid
 		pieces.erase(target_square)
 
 	print("%sの攻撃：%sを墓地に送りました。攻撃コスト%dを支払いました。" % ["先手" if attacker == 0 else "後手", target_name, paid_cost])
+	_add_battle_log("攻撃により (%d, %d) の %s を撃破" % [target_square.y, target_square.x, target_name], attacker)
 	if target_category == "王" or target_name == "王":
 		game_over = true
 		winner = attacker
@@ -3761,16 +4217,26 @@ func _complete_piece_move(from_square: Vector2i, to_square: Vector2i, moving_pie
 			var base_card: Dictionary = CardDatabase.get_card(base_piece_name)
 			if not base_card.is_empty():
 				base_card["owner"] = current_player
+				base_card["original_owner"] = int(target_piece.get("original_owner", original_owner))
+				base_card["is_captured"] = true
 				hands[current_player].append(base_card)
+				_add_battle_log("%s を捕獲（%s を獲得）" % [promotion_name, base_piece_name], current_player)
 				print("%sが%sを捕獲し、元の駒%sを手札に加えました。" % ["先手" if current_player == 0 else "後手", promotion_name, base_piece_name])
 			else:
 				push_error("成駒の元の駒データが見つかりません: " + base_piece_name)
 		else:
 			var captured_card: Dictionary = target_piece.duplicate(true)
 			captured_card["owner"] = current_player
+			captured_card["original_owner"] = int(target_piece.get("original_owner", 1 - current_player))
+			captured_card["is_captured"] = true
 			hands[current_player].append(captured_card)
+			_add_battle_log("%s を捕獲して手札に追加" % str(target_piece.get("name", "?")), current_player)
 			print("%sが%sを捕獲し、手札に加えました。" % ["先手" if current_player == 0 else "後手", str(target_piece.get("name", "?"))])
+	else:
+		_add_battle_log("%s を (%d, %d) へ移動" % [str(moving_piece.get("name", "駒")), to_square.y, to_square.x], current_player)
 
+	last_move_from = from_square
+	last_move_to = to_square
 	pieces.erase(from_square)
 	pieces[to_square] = moving_piece
 	selected_square = Vector2i(-1, -1)
@@ -3783,6 +4249,14 @@ func _complete_piece_move(from_square: Vector2i, to_square: Vector2i, moving_pie
 
 
 func _input(event: InputEvent) -> void:
+	# ヘルプダイアログや成デッキ確認ダイアログが開いている場合のEscキー処理
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if help_dialog_layer != null or promotion_deck_dialog_layer != null:
+			_hide_help_dialog()
+			_hide_promotion_deck_dialog()
+			get_viewport().set_input_as_handled()
+			return
+
 	if not shared_test_mode:
 		if deck_selection_layer != null and is_instance_valid(deck_selection_layer):
 			return
