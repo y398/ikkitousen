@@ -1138,20 +1138,20 @@ func _create_title_return_button() -> void:
 	var button := Button.new()
 	button.text = "タイトルへ戻る"
 	button.tooltip_text = "タイトル画面に戻ります"
-	button.custom_minimum_size = Vector2(160, 46)
+	button.custom_minimum_size = Vector2(144, 40)
 	button.focus_mode = Control.FOCUS_NONE
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
-	button.add_theme_font_size_override("font_size", 15)
+	button.add_theme_font_size_override("font_size", 14)
 
 	# 画面左上に配置
 	button.anchor_left = 0.0
 	button.anchor_right = 0.0
 	button.anchor_top = 0.0
 	button.anchor_bottom = 0.0
-	button.offset_left = 16.0
-	button.offset_right = 176.0
+	button.offset_left = 14.0
+	button.offset_right = 158.0
 	button.offset_top = 10.0
-	button.offset_bottom = 56.0
+	button.offset_bottom = 50.0
 
 	# ボタンの色
 	var normal_style := StyleBoxFlat.new()
@@ -1179,20 +1179,20 @@ func _create_title_return_button() -> void:
 	# P2P対局時は「ルームへ戻る（再戦）」ボタンを下に配置する
 	if P2PNetwork.is_p2p_match:
 		var room_btn := Button.new()
-		room_btn.text = "ルームへ戻る (再戦)"
+		room_btn.text = "ルームへ戻る"
 		room_btn.tooltip_text = "対戦準備ルームに戻ってデッキ変更や再戦を行う"
-		room_btn.custom_minimum_size = Vector2(160, 44)
+		room_btn.custom_minimum_size = Vector2(144, 38)
 		room_btn.focus_mode = Control.FOCUS_NONE
 		room_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-		room_btn.add_theme_font_size_override("font_size", 14)
+		room_btn.add_theme_font_size_override("font_size", 13)
 		room_btn.anchor_left = 0.0
 		room_btn.anchor_right = 0.0
 		room_btn.anchor_top = 0.0
 		room_btn.anchor_bottom = 0.0
-		room_btn.offset_left = 16.0
-		room_btn.offset_right = 176.0
-		room_btn.offset_top = 62.0
-		room_btn.offset_bottom = 106.0
+		room_btn.offset_left = 14.0
+		room_btn.offset_right = 158.0
+		room_btn.offset_top = 54.0
+		room_btn.offset_bottom = 92.0
 
 		var r_style := StyleBoxFlat.new()
 		r_style.bg_color = Color(0.18, 0.24, 0.35)
@@ -2288,11 +2288,11 @@ func _draw() -> void:
 		true
 	)
 
-	# 手番・勝敗表示（1行目: Y=30）
+	# ZONE 1: 手番・王手・山札・手札情報（X: 180 〜 365）
 	var status: String = (
 		"先手の手番" if current_player == 0 else "後手の手番"
 	)
-	var status_color: Color = Color(0.40, 0.72, 1.0) if current_player == 0 else Color(1.0, 0.45, 0.45)
+	var status_color: Color = Color(0.40, 0.75, 1.0) if current_player == 0 else Color(1.0, 0.48, 0.45)
 
 	if game_over:
 		status = "先手の勝利！" if winner == 0 else "後手の勝利！"
@@ -2301,7 +2301,7 @@ func _draw() -> void:
 
 	draw_string(
 		JP_FONT,
-		Vector2(160, 30),
+		Vector2(180, 32),
 		status,
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
@@ -2309,42 +2309,57 @@ func _draw() -> void:
 		status_color
 	)
 
-	# 王手表示（手番の右横に並べて表示する）
-	if not game_over and CheckRules.is_in_check(
-		pieces,
-		current_player
-	):
+	# 王手表示
+	var is_in_check: bool = not game_over and CheckRules.is_in_check(pieces, current_player)
+	if is_in_check:
 		draw_string(
 			JP_FONT,
-			Vector2(300, 30),
+			Vector2(180, 56),
 			"【王手！】",
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
 			20,
-			Color(1.0, 0.30, 0.30)
+			Color(1.0, 0.28, 0.28)
 		)
 
-	# 山札・手札枚数情報（2行目: Y=56）
-	var deck_and_hand_text := "山札：先手 %d枚 / 後手 %d枚   手札：先手 %d枚 / 後手 %d枚" % [
-		decks[0].size(), decks[1].size(),
-		hands[0].size(), hands[1].size()
-	]
+	# 山札・手札枚数情報（筋番号 Y=118 より十分に上の領域に収める）
+	var info_y := 56.0 if not is_in_check else 78.0
 	draw_string(
 		JP_FONT,
-		Vector2(160, 56),
-		deck_and_hand_text,
+		Vector2(180, info_y),
+		"山札: 先手%d枚 / 後手%d枚" % [decks[0].size(), decks[1].size()],
 		HORIZONTAL_ALIGNMENT_LEFT,
-		420,
-		14,
-		Color(0.85, 0.88, 0.95)
+		-1,
+		13,
+		Color(0.80, 0.84, 0.92)
 	)
+	if not is_in_check:
+		draw_string(
+			JP_FONT,
+			Vector2(180, info_y + 18.0),
+			"手札: 先手%d枚 / 後手%d枚" % [hands[0].size(), hands[1].size()],
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			13,
+			Color(0.80, 0.84, 0.92)
+		)
 
-	# コスト情報（先手: 3行目 Y=82、後手: 4行目 Y=106）
+	# ZONE 2: コスト＆備蓄HUDパネル（X: 375 〜 725、幅 350px、高さ 92px）
+	# コストと備蓄を特大フォントで強調し、ひと目で把握できるようにする
+	var cost_panel_rect := Rect2(Vector2(375, 10), Vector2(350, 92))
+	draw_rect(cost_panel_rect, Color(0.08, 0.11, 0.17, 0.88), true)
+	draw_rect(cost_panel_rect, Color(0.30, 0.38, 0.50, 0.75), false, 1.2)
+
+	# 中央の区切り線
+	draw_line(Vector2(385, 56), Vector2(715, 56), Color(0.25, 0.30, 0.42, 0.6), 1.0)
+
 	var font := JP_FONT
-	var cost_label_size := 16
-	var cost_sub_size := 13
+	var label_size := 13
+	var cost_num_size := 26
+	var rec_size := 13
+	var reserve_num_size := 18
 
-	# 先手情報
+	# 先手情報（上段 Y: 40）
 	var sente_rec := _calculate_expected_recovery(0)
 	var sente_nick := ""
 	if P2PNetwork.is_p2p_match:
@@ -2353,25 +2368,43 @@ func _draw() -> void:
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
 		sente_nick = "[あなた]" if human_player_id == 0 else "[CPU(%s)]" % diff_kanji
-	var sente_text := "先手%s コスト %d" % [sente_nick, costs[0]]
-	var sente_rec_text := " (+%d)" % sente_rec
-	var sente_sub_text := "（備蓄 %d/%d）" % [reserves[0], MAX_RESERVES]
 
-	var sente_y := 82.0
-	var sente_x := 160.0
-	var sente_color := Color(0.40, 0.72, 1.0) if current_player == 0 else Color(0.70, 0.78, 0.88)
+	var s_x := 387.0
+	var s_y := 40.0
+	var s_name_text := "先手%s " % sente_nick
+	var s_col := Color(0.40, 0.75, 1.0) if current_player == 0 else Color(0.70, 0.78, 0.88)
+	draw_string(font, Vector2(s_x, s_y - 4.0), s_name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, s_col)
+	s_x += font.get_string_size(s_name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
 
-	draw_string(font, Vector2(sente_x, sente_y), sente_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, sente_color)
-	var s_offset: float = font.get_string_size(sente_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
-	draw_string(font, Vector2(sente_x + s_offset, sente_y), sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size, Color(0.45, 0.90, 0.55))
-	s_offset += font.get_string_size(sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size).x
-	draw_string(font, Vector2(sente_x + s_offset, sente_y), sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, Color(0.85, 0.88, 0.95))
-	s_offset += font.get_string_size(sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
+	var cost_title_text := "コスト "
+	draw_string(font, Vector2(s_x, s_y - 4.0), cost_title_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	s_x += font.get_string_size(cost_title_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
 
+	# コスト数値（特大太字）
+	var s_cost_str := str(costs[0])
+	var s_num_col := Color(0.35, 0.82, 1.0) if current_player == 0 else Color(0.75, 0.82, 0.92)
+	draw_string(font, Vector2(s_x, s_y + 1.0), s_cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_num_size, s_num_col)
+	s_x += font.get_string_size(s_cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_num_size).x
+
+	# 次回復量
+	var s_rec_str := " (+%d)  " % sente_rec
+	draw_string(font, Vector2(s_x, s_y - 4.0), s_rec_str, HORIZONTAL_ALIGNMENT_LEFT, -1, rec_size, Color(0.45, 0.90, 0.55))
+	s_x += font.get_string_size(s_rec_str, HORIZONTAL_ALIGNMENT_LEFT, -1, rec_size).x
+
+	# 備蓄
+	var res_title := "備蓄 "
+	draw_string(font, Vector2(s_x, s_y - 4.0), res_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	s_x += font.get_string_size(res_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	var s_res_str := "%d/%d" % [reserves[0], MAX_RESERVES]
+	draw_string(font, Vector2(s_x, s_y - 1.0), s_res_str, HORIZONTAL_ALIGNMENT_LEFT, -1, reserve_num_size, Color(0.95, 0.82, 0.35))
+	s_x += font.get_string_size(s_res_str, HORIZONTAL_ALIGNMENT_LEFT, -1, reserve_num_size).x
+
+	# 先手手番時の下線
 	if current_player == 0 and not game_over:
-		draw_line(Vector2(sente_x, sente_y + 4.0), Vector2(sente_x + s_offset, sente_y + 4.0), Color(0.35, 0.70, 1.0), 2.5)
+		draw_line(Vector2(385, 50), Vector2(mini(int(s_x + 6), 715), 50), Color(0.35, 0.75, 1.0), 2.5)
 
-	# 後手情報
+	# 後手情報（下段 Y: 86）
 	var gote_rec := _calculate_expected_recovery(1)
 	var gote_nick := ""
 	if P2PNetwork.is_p2p_match:
@@ -2380,23 +2413,40 @@ func _draw() -> void:
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
 		gote_nick = "[あなた]" if human_player_id == 1 else "[CPU(%s)]" % diff_kanji
-	var gote_text := "後手%s コスト %d" % [gote_nick, costs[1]]
-	var gote_rec_text := " (+%d)" % gote_rec
-	var gote_sub_text := "（備蓄 %d/%d）" % [reserves[1], MAX_RESERVES]
 
-	var gote_y := 105.0
-	var gote_x := 160.0
-	var gote_color := Color(1.0, 0.45, 0.45) if current_player == 1 else Color(0.70, 0.78, 0.88)
+	var g_x := 387.0
+	var g_y := 86.0
+	var g_name_text := "後手%s " % gote_nick
+	var g_col := Color(1.0, 0.48, 0.45) if current_player == 1 else Color(0.70, 0.78, 0.88)
+	draw_string(font, Vector2(g_x, g_y - 4.0), g_name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, g_col)
+	g_x += font.get_string_size(g_name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
 
-	draw_string(font, Vector2(gote_x, gote_y), gote_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, gote_color)
-	var g_offset: float = font.get_string_size(gote_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
-	draw_string(font, Vector2(gote_x + g_offset, gote_y), gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size, Color(0.45, 0.90, 0.55))
-	g_offset += font.get_string_size(gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size).x
-	draw_string(font, Vector2(gote_x + g_offset, gote_y), gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, Color(0.85, 0.88, 0.95))
-	g_offset += font.get_string_size(gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
+	var g_cost_title := "コスト "
+	draw_string(font, Vector2(g_x, g_y - 4.0), g_cost_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	g_x += font.get_string_size(g_cost_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
 
+	# コスト数値（特大太字）
+	var g_cost_str := str(costs[1])
+	var g_num_col := Color(1.0, 0.48, 0.45) if current_player == 1 else Color(0.75, 0.82, 0.92)
+	draw_string(font, Vector2(g_x, g_y + 1.0), g_cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_num_size, g_num_col)
+	g_x += font.get_string_size(g_cost_str, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_num_size).x
+
+	# 次回復量
+	var g_rec_str := " (+%d)  " % gote_rec
+	draw_string(font, Vector2(g_x, g_y - 4.0), g_rec_str, HORIZONTAL_ALIGNMENT_LEFT, -1, rec_size, Color(0.45, 0.90, 0.55))
+	g_x += font.get_string_size(g_rec_str, HORIZONTAL_ALIGNMENT_LEFT, -1, rec_size).x
+
+	# 備蓄
+	draw_string(font, Vector2(g_x, g_y - 4.0), res_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
+	g_x += font.get_string_size(res_title, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+
+	var g_res_str := "%d/%d" % [reserves[1], MAX_RESERVES]
+	draw_string(font, Vector2(g_x, g_y - 1.0), g_res_str, HORIZONTAL_ALIGNMENT_LEFT, -1, reserve_num_size, Color(0.95, 0.82, 0.35))
+	g_x += font.get_string_size(g_res_str, HORIZONTAL_ALIGNMENT_LEFT, -1, reserve_num_size).x
+
+	# 後手手番時の下線
 	if current_player == 1 and not game_over:
-		draw_line(Vector2(gote_x, gote_y + 4.0), Vector2(gote_x + g_offset, gote_y + 4.0), Color(1.0, 0.45, 0.45), 2.5)
+		draw_line(Vector2(385, 96), Vector2(mini(int(g_x + 6), 715), 96), Color(1.0, 0.48, 0.45), 2.5)
 
 	# 旗本の公開情報など、両プレイヤーに見せる通知。
 	if not public_notice.is_empty():
@@ -2798,7 +2848,7 @@ func _draw_last_move_highlights() -> void:
 		draw_rect(to_rect, Color(1.0, 0.90, 0.40, 0.80), false, 2.5)
 
 
-# 相手の手札枚数と裏面カード（スリーブ）を描画する
+# 相手の手札枚数と裏面カード（スリーブ）を描画する（ZONE 3: 画面右上）
 func _draw_opponent_hand() -> void:
 	var local_player: int = current_player
 	if P2PNetwork.is_p2p_match:
@@ -2821,20 +2871,20 @@ func _draw_opponent_hand() -> void:
 	var title_text := "%s（%d/5枚）" % [opp_label, opp_hand.size()]
 	draw_string(
 		JP_FONT,
-		Vector2(604, 30),
+		Vector2(745, 26),
 		title_text,
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
-		15,
+		14,
 		Color(0.85, 0.88, 0.95)
 	)
 
 	# 相手の手札カード（裏面スリーブ）を並べる
-	var card_w: float = 46.0
-	var card_h: float = 64.0
+	var card_w: float = 44.0
+	var card_h: float = 62.0
 	var gap: float = 8.0
-	var start_x: float = 604.0
-	var start_y: float = 38.0
+	var start_x: float = 745.0
+	var start_y: float = 34.0
 
 	for i in range(opp_hand.size()):
 		var c_rect := Rect2(start_x + i * (card_w + gap), start_y, card_w, card_h)
