@@ -62,10 +62,12 @@ var cancel_button: Button
 var context_action_button: Button
 var help_button: Button
 var promotion_deck_button: Button
+var battle_log_button: Button
 
 # UIダイアログおよび情報表示レイヤー
 var help_dialog_layer: CanvasLayer
 var promotion_deck_dialog_layer: CanvasLayer
+var battle_log_dialog_layer: CanvasLayer
 
 # 対局ログ（直近の行動履歴）および直前移動マス
 var battle_logs: Array[Dictionary] = []
@@ -1221,10 +1223,10 @@ func _create_action_ui_buttons() -> void:
 	end_turn_button = Button.new()
 	end_turn_button.text = "手番終了 (Space)"
 	end_turn_button.tooltip_text = "手番を終了し、相手のターンへ移行する"
-	end_turn_button.custom_minimum_size = Vector2(240, 46)
+	end_turn_button.custom_minimum_size = Vector2(365, 46)
 	end_turn_button.focus_mode = Control.FOCUS_NONE
 	end_turn_button.add_theme_font_size_override("font_size", 16)
-	end_turn_button.offset_left = 880.0
+	end_turn_button.offset_left = 755.0
 	end_turn_button.offset_top = 580.0
 	end_turn_button.offset_right = 1120.0
 	end_turn_button.offset_bottom = 626.0
@@ -1308,12 +1310,12 @@ func _create_action_ui_buttons() -> void:
 	promotion_deck_button = Button.new()
 	promotion_deck_button.text = "成デッキ確認"
 	promotion_deck_button.tooltip_text = "双方の成デッキの残りカードを確認する"
-	promotion_deck_button.custom_minimum_size = Vector2(130, 46)
+	promotion_deck_button.custom_minimum_size = Vector2(140, 46)
 	promotion_deck_button.focus_mode = Control.FOCUS_NONE
 	promotion_deck_button.add_theme_font_size_override("font_size", 14)
 	promotion_deck_button.offset_left = 604.0
 	promotion_deck_button.offset_top = 580.0
-	promotion_deck_button.offset_right = 734.0
+	promotion_deck_button.offset_right = 744.0
 	promotion_deck_button.offset_bottom = 626.0
 
 	var promo_btn_style := StyleBoxFlat.new()
@@ -1333,34 +1335,57 @@ func _create_action_ui_buttons() -> void:
 	promotion_deck_button.pressed.connect(_show_promotion_deck_dialog)
 	action_ui_layer.add_child(promotion_deck_button)
 
-	# 5. 操作ヘルプボタン
+	# 5. 操作ヘルプボタン（画面右上の「？」丸型ボタン）
 	help_button = Button.new()
-	help_button.text = "操作ヘルプ (?)"
-	help_button.tooltip_text = "操作方法およびゲームルールを確認する"
-	help_button.custom_minimum_size = Vector2(120, 46)
+	help_button.text = "?"
+	help_button.tooltip_text = "操作ヘルプ・ゲームルールを確認する"
+	help_button.custom_minimum_size = Vector2(38, 38)
 	help_button.focus_mode = Control.FOCUS_NONE
-	help_button.add_theme_font_size_override("font_size", 14)
-	help_button.offset_left = 744.0
-	help_button.offset_top = 580.0
-	help_button.offset_right = 864.0
-	help_button.offset_bottom = 626.0
+	help_button.add_theme_font_size_override("font_size", 18)
+	help_button.offset_left = 1096.0
+	help_button.offset_top = 12.0
+	help_button.offset_right = 1134.0
+	help_button.offset_bottom = 50.0
 
 	var help_btn_style := StyleBoxFlat.new()
-	help_btn_style.bg_color = Color(0.13, 0.15, 0.20)
-	help_btn_style.border_color = Color(0.45, 0.52, 0.65)
-	help_btn_style.set_border_width_all(1)
-	help_btn_style.set_corner_radius_all(6)
+	help_btn_style.bg_color = Color(0.12, 0.16, 0.24)
+	help_btn_style.border_color = Color(0.75, 0.65, 0.35)
+	help_btn_style.set_border_width_all(2)
+	help_btn_style.set_corner_radius_all(19)
 	help_button.add_theme_stylebox_override("normal", help_btn_style)
 
 	var help_btn_hover := StyleBoxFlat.new()
-	help_btn_hover.bg_color = Color(0.19, 0.22, 0.30)
-	help_btn_hover.border_color = Color(0.70, 0.78, 0.95)
+	help_btn_hover.bg_color = Color(0.19, 0.25, 0.38)
+	help_btn_hover.border_color = Color(1.0, 0.88, 0.45)
 	help_btn_hover.set_border_width_all(2)
-	help_btn_hover.set_corner_radius_all(6)
+	help_btn_hover.set_corner_radius_all(19)
 	help_button.add_theme_stylebox_override("hover", help_btn_hover)
 
 	help_button.pressed.connect(_show_help_dialog)
 	action_ui_layer.add_child(help_button)
+
+	# 6. 対局ログパネルのクリックボタン（全履歴モーダルを開く）
+	battle_log_button = Button.new()
+	battle_log_button.custom_minimum_size = Vector2(260, 72)
+	battle_log_button.focus_mode = Control.FOCUS_NONE
+	battle_log_button.tooltip_text = "クリックして対局ログ全履歴を表示する"
+	battle_log_button.offset_left = 604.0
+	battle_log_button.offset_top = 496.0
+	battle_log_button.offset_right = 864.0
+	battle_log_button.offset_bottom = 568.0
+
+	var log_btn_normal := StyleBoxEmpty.new()
+	battle_log_button.add_theme_stylebox_override("normal", log_btn_normal)
+
+	var log_btn_hover := StyleBoxFlat.new()
+	log_btn_hover.bg_color = Color(0.35, 0.45, 0.65, 0.12)
+	log_btn_hover.border_color = Color(0.85, 0.70, 0.35, 0.75)
+	log_btn_hover.set_border_width_all(2)
+	log_btn_hover.set_corner_radius_all(4)
+	battle_log_button.add_theme_stylebox_override("hover", log_btn_hover)
+
+	battle_log_button.pressed.connect(_show_battle_log_dialog)
+	action_ui_layer.add_child(battle_log_button)
 
 
 # 成デッキ確認モーダルダイアログを表示する
@@ -1550,6 +1575,142 @@ func _hide_help_dialog() -> void:
 	if help_dialog_layer != null:
 		help_dialog_layer.queue_free()
 		help_dialog_layer = null
+
+
+# 対局ログ全履歴モーダルダイアログを表示する
+func _show_battle_log_dialog() -> void:
+	if battle_log_dialog_layer != null:
+		return
+
+	battle_log_dialog_layer = CanvasLayer.new()
+	battle_log_dialog_layer.layer = 180
+	add_child(battle_log_dialog_layer)
+
+	# 背景の暗転（クリックでダイアログを閉じる）
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.82)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed:
+			_hide_battle_log_dialog()
+	)
+	battle_log_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(560, 480)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.10, 0.16)
+	panel_style.border_color = Color(0.42, 0.50, 0.65)
+	panel_style.set_border_width_all(2)
+	panel_style.set_corner_radius_all(10)
+	panel_style.set_content_margin_all(20)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	panel.add_child(vbox)
+
+	# ヘッダー（タイトルと閉じるボタン）
+	var header_hbox := HBoxContainer.new()
+	vbox.add_child(header_hbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "対局ログ全履歴（全 %d 件）" % battle_logs.size()
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_hbox.add_child(title_lbl)
+
+	var close_btn := Button.new()
+	close_btn.text = "閉じる (Esc)"
+	close_btn.custom_minimum_size = Vector2(100, 32)
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.add_theme_font_size_override("font_size", 13)
+	close_btn.pressed.connect(_hide_battle_log_dialog)
+	header_hbox.add_child(close_btn)
+
+	var sep := HSeparator.new()
+	sep.add_theme_color_override("separator", Color(0.25, 0.30, 0.40))
+	vbox.add_child(sep)
+
+	# スクロールコンテナ
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroll)
+
+	var list_vbox := VBoxContainer.new()
+	list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_vbox.add_theme_constant_override("separation", 6)
+	scroll.add_child(list_vbox)
+
+	if battle_logs.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "まだ行動履歴はありません"
+		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.add_theme_font_size_override("font_size", 14)
+		empty_lbl.add_theme_color_override("font_color", Color(0.60, 0.65, 0.75))
+		list_vbox.add_child(empty_lbl)
+	else:
+		for i in range(battle_logs.size()):
+			var entry: Dictionary = battle_logs[i]
+			var player_id: int = int(entry.get("player", 0))
+			var log_text: String = str(entry.get("text", ""))
+
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 10)
+
+			# ログ番号
+			var num_lbl := Label.new()
+			num_lbl.text = "#%02d" % (i + 1)
+			num_lbl.custom_minimum_size.x = 35
+			num_lbl.add_theme_font_size_override("font_size", 12)
+			num_lbl.add_theme_color_override("font_color", Color(0.50, 0.55, 0.65))
+			row.add_child(num_lbl)
+
+			# 先手/後手バッジ
+			var p_badge := Label.new()
+			p_badge.text = "先手" if player_id == 0 else "後手"
+			p_badge.custom_minimum_size.x = 42
+			p_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			p_badge.add_theme_font_size_override("font_size", 12)
+			var p_color := Color(0.40, 0.72, 1.0) if player_id == 0 else Color(1.0, 0.48, 0.45)
+			p_badge.add_theme_color_override("font_color", p_color)
+			row.add_child(p_badge)
+
+			# 行動内容テキスト
+			var text_lbl := Label.new()
+			text_lbl.text = log_text
+			text_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			text_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			text_lbl.add_theme_font_size_override("font_size", 13)
+			text_lbl.add_theme_color_override("font_color", Color(0.90, 0.93, 0.98))
+			row.add_child(text_lbl)
+
+			list_vbox.add_child(row)
+
+	# 一番下にスクロールする
+	await get_tree().process_frame
+	if is_instance_valid(scroll):
+		var v_bar := scroll.get_v_scroll_bar()
+		if v_bar != null:
+			scroll.scroll_vertical = int(v_bar.max_value)
+
+
+# 対局ログ全履歴モーダルダイアログを閉じる
+func _hide_battle_log_dialog() -> void:
+	if battle_log_dialog_layer != null:
+		battle_log_dialog_layer.queue_free()
+		battle_log_dialog_layer = null
 
 
 func _on_end_turn_button_pressed() -> void:
@@ -2127,136 +2288,115 @@ func _draw() -> void:
 		true
 	)
 
-	# 手番・勝敗表示
+	# 手番・勝敗表示（1行目: Y=30）
 	var status: String = (
 		"先手の手番" if current_player == 0 else "後手の手番"
 	)
+	var status_color: Color = Color(0.40, 0.72, 1.0) if current_player == 0 else Color(1.0, 0.45, 0.45)
 
 	if game_over:
 		status = "先手の勝利！" if winner == 0 else "後手の勝利！"
+		status_color = Color(1.0, 0.85, 0.30)
 		_show_game_over_dialog()
 
 	draw_string(
 		JP_FONT,
-		Vector2(180, 35),
+		Vector2(160, 30),
 		status,
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
-		25,
-		Color(0.95, 0.97, 1.0)
+		22,
+		status_color
 	)
 
-	# 王手表示
+	# 王手表示（手番の右横に並べて表示する）
 	if not game_over and CheckRules.is_in_check(
 		pieces,
 		current_player
 	):
 		draw_string(
 			JP_FONT,
-			Vector2(180, 66),
-			"王手！",
+			Vector2(300, 30),
+			"【王手！】",
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
-			22,
-			Color(1.0, 0.35, 0.35)
+			20,
+			Color(1.0, 0.30, 0.30)
 		)
 
-	# 山札・手札枚数情報
-	var deck_and_hand_text := "山札：先手 %d枚 / 後手 %d枚    手札：先手 %d枚 / 後手 %d枚" % [
+	# 山札・手札枚数情報（2行目: Y=56）
+	var deck_and_hand_text := "山札：先手 %d枚 / 後手 %d枚   手札：先手 %d枚 / 後手 %d枚" % [
 		decks[0].size(), decks[1].size(),
 		hands[0].size(), hands[1].size()
 	]
 	draw_string(
 		JP_FONT,
-		Vector2(340, 45),
+		Vector2(160, 56),
 		deck_and_hand_text,
 		HORIZONTAL_ALIGNMENT_LEFT,
-		600,
-		24,
-		Color(0.90, 0.93, 0.98)
+		420,
+		14,
+		Color(0.85, 0.88, 0.95)
 	)
 
-	# コスト・備蓄・次回復量および現在手番の下線描画
+	# コスト情報（先手: 3行目 Y=82、後手: 4行目 Y=106）
 	var font := JP_FONT
-	var base_y := 80.0
-	var label_size := 26
-	var sub_size := 18
-	var cur_x := 340.0
+	var cost_label_size := 16
+	var cost_sub_size := 13
 
-	# 「コスト：」プレフィックスを描画する
-	var header_text := "コスト："
-	draw_string(font, Vector2(cur_x, base_y), header_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.90, 0.93, 0.98))
-	cur_x += font.get_string_size(header_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-
-	# 先手情報：コスト、次ターン回復量、備蓄最大値を描画する
-	var sente_start_x := cur_x
+	# 先手情報
 	var sente_rec := _calculate_expected_recovery(0)
-	var sente_nick_suffix := ""
+	var sente_nick := ""
 	if P2PNetwork.is_p2p_match:
 		var s_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 0 else P2PNetwork.remote_nickname
-		var s_fmt := " [%s](あなた)" if P2PNetwork.local_player_id == 0 else " [%s]"
-		sente_nick_suffix = s_fmt % s_name
+		sente_nick = "[あなた]" if P2PNetwork.local_player_id == 0 else "[%s]" % s_name
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
-		sente_nick_suffix = "(あなた)" if human_player_id == 0 else "[CPU(%s)]" % diff_kanji
-	var sente_label := "先手%s" % sente_nick_suffix
-	var sente_main_text := "%s %d" % [sente_label, costs[0]]
+		sente_nick = "[あなた]" if human_player_id == 0 else "[CPU(%s)]" % diff_kanji
+	var sente_text := "先手%s コスト %d" % [sente_nick, costs[0]]
 	var sente_rec_text := " (+%d)" % sente_rec
-	var sente_sub_text := "（備蓄%d/%d）" % [reserves[0], MAX_RESERVES]
+	var sente_sub_text := "（備蓄 %d/%d）" % [reserves[0], MAX_RESERVES]
 
-	var sente_color := Color(0.40, 0.72, 1.0) if current_player == 0 else Color(0.75, 0.82, 0.92)
-	draw_string(font, Vector2(cur_x, base_y), sente_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, sente_color)
-	cur_x += font.get_string_size(sente_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+	var sente_y := 82.0
+	var sente_x := 160.0
+	var sente_color := Color(0.40, 0.72, 1.0) if current_player == 0 else Color(0.70, 0.78, 0.88)
 
-	# 次にもらえるコストを小さめの文字で描画する
-	draw_string(font, Vector2(cur_x, base_y), sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size, Color(0.45, 0.90, 0.55))
-	cur_x += font.get_string_size(sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size).x
+	draw_string(font, Vector2(sente_x, sente_y), sente_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, sente_color)
+	var s_offset: float = font.get_string_size(sente_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
+	draw_string(font, Vector2(sente_x + s_offset, sente_y), sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size, Color(0.45, 0.90, 0.55))
+	s_offset += font.get_string_size(sente_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size).x
+	draw_string(font, Vector2(sente_x + s_offset, sente_y), sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, Color(0.85, 0.88, 0.95))
+	s_offset += font.get_string_size(sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
 
-	draw_string(font, Vector2(cur_x, base_y), sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
-	cur_x += font.get_string_size(sente_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-	var sente_end_x := cur_x
-
-	# 先手の手番時は先手部分の下に分かりやすい下線を引く
 	if current_player == 0 and not game_over:
-		var underline_y := base_y + 6.0
-		draw_line(Vector2(sente_start_x, underline_y), Vector2(sente_end_x, underline_y), Color(0.35, 0.70, 1.0), 3.0)
+		draw_line(Vector2(sente_x, sente_y + 4.0), Vector2(sente_x + s_offset, sente_y + 4.0), Color(0.35, 0.70, 1.0), 2.5)
 
-	# 区切り線を描画する
-	var sep_text := "  /  "
-	draw_string(font, Vector2(cur_x, base_y), sep_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.50, 0.55, 0.65))
-	cur_x += font.get_string_size(sep_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-
-	# 後手情報：コスト、次ターン回復量、備蓄最大値を描画する
-	var gote_start_x := cur_x
+	# 後手情報
 	var gote_rec := _calculate_expected_recovery(1)
-	var gote_nick_suffix := ""
+	var gote_nick := ""
 	if P2PNetwork.is_p2p_match:
 		var g_name := P2PNetwork.local_nickname if P2PNetwork.local_player_id == 1 else P2PNetwork.remote_nickname
-		var g_fmt := " [%s](あなた)" if P2PNetwork.local_player_id == 1 else " [%s]"
-		gote_nick_suffix = g_fmt % g_name
+		gote_nick = "[あなた]" if P2PNetwork.local_player_id == 1 else "[%s]" % g_name
 	elif is_cpu_match:
 		var diff_kanji := "初級" if cpu_difficulty == "easy" else ("中級" if cpu_difficulty == "normal" else "最強")
-		gote_nick_suffix = "(あなた)" if human_player_id == 1 else "[CPU(%s)]" % diff_kanji
-	var gote_label := "後手%s" % gote_nick_suffix
-	var gote_main_text := "%s %d" % [gote_label, costs[1]]
+		gote_nick = "[あなた]" if human_player_id == 1 else "[CPU(%s)]" % diff_kanji
+	var gote_text := "後手%s コスト %d" % [gote_nick, costs[1]]
 	var gote_rec_text := " (+%d)" % gote_rec
-	var gote_sub_text := "（備蓄%d/%d）" % [reserves[1], MAX_RESERVES]
+	var gote_sub_text := "（備蓄 %d/%d）" % [reserves[1], MAX_RESERVES]
 
-	var gote_color := Color(1.0, 0.45, 0.45) if current_player == 1 else Color(0.75, 0.82, 0.92)
-	draw_string(font, Vector2(cur_x, base_y), gote_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, gote_color)
-	cur_x += font.get_string_size(gote_main_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+	var gote_y := 105.0
+	var gote_x := 160.0
+	var gote_color := Color(1.0, 0.45, 0.45) if current_player == 1 else Color(0.70, 0.78, 0.88)
 
-	draw_string(font, Vector2(cur_x, base_y), gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size, Color(0.45, 0.90, 0.55))
-	cur_x += font.get_string_size(gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, sub_size).x
+	draw_string(font, Vector2(gote_x, gote_y), gote_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, gote_color)
+	var g_offset: float = font.get_string_size(gote_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
+	draw_string(font, Vector2(gote_x + g_offset, gote_y), gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size, Color(0.45, 0.90, 0.55))
+	g_offset += font.get_string_size(gote_rec_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_sub_size).x
+	draw_string(font, Vector2(gote_x + g_offset, gote_y), gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size, Color(0.85, 0.88, 0.95))
+	g_offset += font.get_string_size(gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cost_label_size).x
 
-	draw_string(font, Vector2(cur_x, base_y), gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0.85, 0.88, 0.95))
-	cur_x += font.get_string_size(gote_sub_text, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-	var gote_end_x := cur_x
-
-	# 後手の手番時は後手部分の下に分かりやすい下線を引く
 	if current_player == 1 and not game_over:
-		var underline_y := base_y + 6.0
-		draw_line(Vector2(gote_start_x, underline_y), Vector2(gote_end_x, underline_y), Color(1.0, 0.45, 0.45), 3.0)
+		draw_line(Vector2(gote_x, gote_y + 4.0), Vector2(gote_x + g_offset, gote_y + 4.0), Color(1.0, 0.45, 0.45), 2.5)
 
 	# 旗本の公開情報など、両プレイヤーに見せる通知。
 	if not public_notice.is_empty():
@@ -2794,6 +2934,15 @@ func _draw_battle_log_panel() -> void:
 		-1,
 		12,
 		Color(0.75, 0.82, 0.95)
+	)
+	draw_string(
+		JP_FONT,
+		Vector2(804, 510),
+		"全履歴 ↗",
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		11,
+		Color(0.85, 0.72, 0.40)
 	)
 
 	if battle_logs.is_empty():
@@ -4249,11 +4398,12 @@ func _complete_piece_move(from_square: Vector2i, to_square: Vector2i, moving_pie
 
 
 func _input(event: InputEvent) -> void:
-	# ヘルプダイアログや成デッキ確認ダイアログが開いている場合のEscキー処理
+	# ヘルプダイアログや成デッキ確認ダイアログ、対局ログダイアログが開いている場合のEscキー処理
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		if help_dialog_layer != null or promotion_deck_dialog_layer != null:
+		if help_dialog_layer != null or promotion_deck_dialog_layer != null or battle_log_dialog_layer != null:
 			_hide_help_dialog()
 			_hide_promotion_deck_dialog()
+			_hide_battle_log_dialog()
 			get_viewport().set_input_as_handled()
 			return
 

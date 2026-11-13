@@ -22,6 +22,7 @@ var deck_library: Dictionary = {}
 var selected_deck_id: String = "deck_1"
 var my_profile: Dictionary = {}
 var opponent_profile: Dictionary = {}
+var help_dialog_layer: CanvasLayer
 
 # 接続前UI要素
 var connection_section: VBoxContainer
@@ -140,6 +141,40 @@ func _build_ui() -> void:
 	_style_button(back_btn, false)
 	back_btn.pressed.connect(_on_back_to_title_pressed)
 	add_child(back_btn)
+
+	# 画面右上の操作ヘルプ「？」丸型ボタン
+	var help_button := Button.new()
+	help_button.text = "?"
+	help_button.tooltip_text = "操作ヘルプ・ゲームルールを確認する"
+	help_button.custom_minimum_size = Vector2(38, 38)
+	help_button.focus_mode = Control.FOCUS_NONE
+	help_button.add_theme_font_size_override("font_size", 18)
+	help_button.anchor_left = 1.0
+	help_button.anchor_top = 0.0
+	help_button.anchor_right = 1.0
+	help_button.anchor_bottom = 0.0
+	help_button.offset_left = -56.0
+	help_button.offset_top = 16.0
+	help_button.offset_right = -18.0
+	help_button.offset_bottom = 54.0
+	help_button.z_index = 10
+
+	var help_style := StyleBoxFlat.new()
+	help_style.bg_color = Color(0.10, 0.13, 0.20)
+	help_style.border_color = Color(0.75, 0.65, 0.35)
+	help_style.set_border_width_all(2)
+	help_style.set_corner_radius_all(19)
+	help_button.add_theme_stylebox_override("normal", help_style)
+
+	var help_hover := StyleBoxFlat.new()
+	help_hover.bg_color = Color(0.16, 0.22, 0.34)
+	help_hover.border_color = Color(1.0, 0.88, 0.45)
+	help_hover.set_border_width_all(2)
+	help_hover.set_corner_radius_all(19)
+	help_button.add_theme_stylebox_override("hover", help_hover)
+
+	help_button.pressed.connect(_show_help_dialog)
+	add_child(help_button)
 
 	var root_vbox := VBoxContainer.new()
 	root_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -792,3 +827,118 @@ func _save_nickname(nick: String) -> void:
 	var file := FileAccess.open(PLAYER_CONFIG_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify({"nickname": nick}))
+
+
+# 操作ヘルプダイアログを表示する
+func _show_help_dialog() -> void:
+	if help_dialog_layer != null:
+		return
+
+	help_dialog_layer = CanvasLayer.new()
+	help_dialog_layer.layer = 180
+	add_child(help_dialog_layer)
+
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.02, 0.03, 0.06, 0.82)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed:
+			_hide_help_dialog()
+	)
+	help_dialog_layer.add_child(backdrop)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	backdrop.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(560, 480)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.10, 0.16)
+	panel_style.border_color = Color(0.42, 0.50, 0.65)
+	panel_style.set_border_width_all(2)
+	panel_style.set_corner_radius_all(10)
+	panel_style.set_content_margin_all(20)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	panel.add_child(vbox)
+
+	var header_hbox := HBoxContainer.new()
+	vbox.add_child(header_hbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "一騎当千 操作ヘルプ＆ゲームルール"
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_hbox.add_child(title_lbl)
+
+	var close_btn := Button.new()
+	close_btn.text = "閉じる (Esc)"
+	close_btn.custom_minimum_size = Vector2(95, 32)
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.add_theme_font_size_override("font_size", 13)
+	close_btn.pressed.connect(_hide_help_dialog)
+	header_hbox.add_child(close_btn)
+
+	var sep := HSeparator.new()
+	sep.add_theme_color_override("separator", Color(0.25, 0.30, 0.40))
+	vbox.add_child(sep)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroll)
+
+	var help_text := Label.new()
+	help_text.text = """【ゲームの目的】
+相手の「王」を捕獲するか、遠隔攻撃で討ち取ると勝利となります。
+
+【ターンの流れ】
+1. コスト回復（毎ターン基本+2コスト、領地占領でさらに増加）
+2. ドロー（山札からカードを1枚補充）
+3. 行動（召喚・駒の移動・攻撃・罠起動など、コストの許す限り自由に行動可能）
+4. 手番終了（未使用コストは最大3まで備蓄され、次ターン以降に利用可能）
+
+【カードの種類】
+・兵：盤面に召喚して移動・攻撃を行う駒
+・成：特定の駒が敵陣進入等でパワーアップする成駒（成デッキから自動昇格）
+・壁：配置マスを塞ぎ、進路や突撃を遮断する
+・罠：盤面に裏向きで伏せ、敵が踏み込んだ時に効果を発動する
+
+【基本操作】
+・手札の選択：手札カードをクリック
+・召喚：手札選択後、自陣のハイライトされたマスをクリック
+・駒の移動：自分の駒をクリックして選択後、移動可能マスをクリック
+・手番終了：画面右下の「手番終了」ボタン または [Space] キー
+・選択解除：画面右下の「選択解除」ボタン または [Esc] キー
+
+【駒の捕獲とスリーブ（裏面）】
+・相手の駒を捕獲すると、自分の手札に加わり再利用できます
+・アナログTCG同様、相手の手札の裏面（スリーブ）を見ることで、奪われた自陣の駒が含まれているか確認できます（自陣スリーブ色のカードが相手の手札に表示されます）"""
+	help_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	help_text.add_theme_font_size_override("font_size", 13)
+	help_text.add_theme_color_override("font_color", Color(0.90, 0.93, 0.98))
+	scroll.add_child(help_text)
+
+
+# 操作ヘルプダイアログを閉じる
+func _hide_help_dialog() -> void:
+	if help_dialog_layer != null:
+		help_dialog_layer.queue_free()
+		help_dialog_layer = null
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if help_dialog_layer != null:
+			_hide_help_dialog()
+			get_viewport().set_input_as_handled()
